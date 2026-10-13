@@ -44,12 +44,48 @@ npm start
 
 Release 里给的是**免安装版**，解压即用，不需要装 Node.js 和 Python：
 
-- `有人云巡站客户端-Windows-x64.zip` → 解压后双击 `有人云巡站客户端.exe`
-- `有人云巡站客户端-macOS-arm64.zip` → 解压后把 `.app` 拖进「应用程序」，
-  首次运行需右键 →「打开」（未签名）
+| 文件 | 平台 | 怎么用 |
+| --- | --- | --- |
+| `usrcloud-patrol-client-Windows-x64.zip` | Windows 10/11 x64 | 解压后双击 `有人云巡站客户端.exe` |
+| `usrcloud-patrol-client-macOS-arm64.zip` | Apple Silicon Mac | 解压后把 `.app` 拖进「应用程序」，首次打开**必须右键**（见下一节） |
 
-Windows 版自带 Python 运行时（65 MB，含 pillow / requests / paho-mqtt）。
-macOS 版使用系统 `python3`，首次启动会提示安装依赖。
+两个包都**自带 Python 3.11 运行时**（含 pillow / requests / paho-mqtt），
+不依赖系统里装的 Python。Windows 版放在 `resources/app/python/python.exe`，
+macOS 版放在 `Contents/Resources/app/python/bin/python3`（到 `python3.11` 的符号链接）；
+只有找不到内置解释器时才回落到系统 `python3`。
+
+### macOS 未签名，首次打开怎么过门禁
+
+本项目的 Mac 包**没有苹果开发者签名**（没有交 99 美元/年的开发者账号费用），
+所以 macOS 的 Gatekeeper 会拦截，表现是双击后弹：
+
+> 「有人云巡站客户端」已损坏，无法打开。您应该将它移到废纸篓。
+
+**这不是文件损坏，也不是病毒**，只是系统不认识开发者。三种办法任选：
+
+**办法一（推荐，最省事）**
+1. 在访达里找到 `有人云巡站客户端.app`
+2. **右键**（或按住 Control 点）→ 选「打开」
+3. 弹窗里点「打开」
+
+只需要做这一次，之后双击就能直接启动。
+
+**办法二（用包内脚本）**
+双击 zip 解压出来的 `解除门禁.command`，它会自动对 app 做一次去隔离属性处理。
+
+**办法三（命令行）**
+```bash
+xattr -dr com.apple.quarantine "/Applications/有人云巡站客户端.app"
+```
+
+如果还想手动确认，可以看下签名状态：
+```bash
+spctl -a -vv "/Applications/有人云巡站客户端.app"
+# 输出 "rejected" 是正常的，说明只是没签名，不是被判定为恶意软件
+```
+
+> 说明：只有从网上下载的 app 会被打上隔离属性（quarantine）。
+> 自己编译的、或用 U 盘拷的，通常不会触发这个提示。
 
 ## 四、运行时数据写到哪
 
