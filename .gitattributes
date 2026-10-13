@@ -1,0 +1,11 @@
+# 行尾统一：Mac/Linux 脚本必须是 LF（CRLF 的 .command 在 macOS 上直接报 bad interpreter）
+* text=auto
+
+*.command text eol=lf
+*.sh      text eol=lf
+*.py      text eol=lf
+*.js      text eol=lf
+*.html    text eol=lf
+*.md      text eol=lf
+*.bat     text eol=crlf
+*.csv     text eol=crlf

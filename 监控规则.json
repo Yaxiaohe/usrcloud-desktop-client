@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "stale_minutes": 30,
+  "flag_blank": true,
+  "notify_on_change_only": true,
+  "rules": []
+}

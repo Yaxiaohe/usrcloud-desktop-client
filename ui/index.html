@@ -1,0 +1,2866 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>有人云巡站客户端</title>
+</head>
+<body data-view="watch">
+<style>
+  /* ===== 全局 ===== */
+  html,body{margin:0;height:100%;background:#EDEEF1;
+    font-family:-apple-system,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif;
+    color:#1A1D21;font-size:13px;line-height:1.5;overflow:hidden}
+  button{font-family:inherit;cursor:pointer}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+  /* ===== 主窗口（新 QQ 风三栏）===== */
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#EDEEF1}
+  .win{width:1180px;height:760px;flex:none;display:flex;transform-origin:center center;background:#FFFFFF;
+    border:1px solid #E3E6EB;border-radius:12px;overflow:hidden;box-shadow:0 12px 40px rgba(20,30,50,.16)}
+
+  /* 左侧图标导航 */
+  .rail{width:56px;flex:none;background:#F4F5F7;border-right:1px solid #E9EBEF;display:flex;flex-direction:column;align-items:center;padding:14px 0 12px}
+  .logo{width:32px;height:32px;border-radius:9px;background:#2F6BFF;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;margin-bottom:16px}
+  .ic{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#8A9099;margin-bottom:4px;background:none;border:none;padding:0}
+  .ic:hover{background:#E9EBEF;color:#5A6472}
+  .ic.on{background:#E7EFFE;color:#2F6BFF}
+  .ic.on:hover{background:#E7EFFE;color:#2F6BFF}
+  .railsp{flex:1}
+
+  /* 中间账号列表 */
+  .col{width:296px;flex:none;background:#FAFAFB;border-right:1px solid #E9EBEF;display:flex;flex-direction:column}
+  body:not([data-view="patrol"]):not([data-view="watch"]):not([data-view="history"]) .col{display:none}   /* 账号列表在巡站/监控/历史页显示 */
+  .srch{padding:14px 12px 10px;display:flex;gap:8px;align-items:center}
+  .sbox{flex:1;height:32px;background:#EFF1F4;border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 10px;color:#9CA3AF;font-size:12px}
+  /* 搜索框现在是真的 input（原来是个 div，所以根本没法输入）。
+     外面 .sbox 继续管底色/圆角/放大镜图标，里面 input 透明无边框，外观与原来一致。 */
+  .sbox input{flex:1;min-width:0;border:0;background:transparent;outline:none;padding:0;font-size:12px;color:#3A4048;font-family:inherit}
+  .sbox input::placeholder{color:#9CA3AF}
+  .sbox:focus-within{background:#E7EAEE}
+  .sbox:focus-within svg{color:#6B7280}
+  .addbtn{width:32px;height:32px;flex:none;border-radius:8px;background:#2F6BFF;color:#fff;border:none;display:flex;align-items:center;justify-content:center;padding:0}
+  .addbtn:hover{background:#2559DE}
+  .items{flex:1;padding:2px 8px;overflow-y:auto}
+  .it{display:flex;gap:10px;padding:11px 10px;border-radius:9px;position:relative;cursor:pointer}
+  .it:hover{background:#F1F2F5}
+  .it.on{background:#EAF1FE}
+  .it.on:hover{background:#EAF1FE}
+  .it.on::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:#2F6BFF}
+  .av{width:38px;height:38px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:500}
+  .imid{flex:1;min-width:0}
+  .nm{font-size:13.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:12px;color:#7B828C;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .irt{flex:none;text-align:right}
+  .tm{font-size:11px;color:#A3A9B2}
+  .bdg{display:inline-block;margin-top:6px;min-width:20px;height:18px;line-height:18px;padding:0 6px;border-radius:9px;background:#DFE4EC;color:#5A6472;font-size:11px;text-align:center}
+  .bdg.hot{background:#2F6BFF;color:#fff}
+  .lfoot{border-top:1px solid #E9EBEF;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#7B828C}
+  .lk{color:#2F6BFF;text-decoration:none;cursor:pointer}
+
+  /* 主区 */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff}
+  .bar{height:64px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #EFF1F4}
+  .tit{margin:0;font-size:14px;font-weight:500}
+  .bsub{margin:3px 0 0;font-size:12px;color:#7B828C}
+  .acts{display:flex;gap:8px;align-items:center}
+  .btn{height:32px;padding:0 13px;border-radius:8px;border:1px solid #E1E4E9;background:#fff;color:#3A4048;font-size:12.5px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:none}
+  .btn:hover{background:#F6F7F9}
+  .btn.pri{background:#2F6BFF;border-color:#2F6BFF;color:#fff}
+  .btn.pri:hover{background:#2559DE}
+  .btn:disabled{opacity:.5;cursor:default}
+
+  .midarea{flex:1;display:flex;min-height:0}
+  .dlist{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid #EFF1F4}
+  .dhead,.drow{display:grid;grid-template-columns:minmax(170px,1fr) 96px 104px;align-items:center;padding:0 16px}
+  .dhead{height:34px;flex:none;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-bottom:1px solid #EFF1F4}
+  .dhead span:last-child{text-align:right}
+  /* 表头可点排序。.s 保持 inline（不能用 inline-flex），否则最后一列会丢掉右对齐 */
+  .dhead .s{cursor:pointer;user-select:none;white-space:nowrap}
+  .dhead .s:hover{color:#3A4048}
+  .dhead .s.on{color:#2F6BFF;font-weight:600}
+  .dhead .s i{font-style:normal;font-size:9px;margin-left:3px;opacity:.4;position:relative;top:-1px}
+  .dhead .s.on i{opacity:1}
+  .dbody{flex:1;min-height:0;overflow-y:auto}
+  .drow{height:44px;flex:none;border-bottom:1px solid #F4F5F7;cursor:pointer}
+  .drow:hover{background:#F8FAFE}
+  .drow.on{background:#EDF3FE}
+  .dname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:10px}
+  .st{display:flex;align-items:center;font-size:12px}
+  .dot{width:7px;height:7px;border-radius:50%;margin-right:6px;flex:none}
+  .age{font-size:11.5px;color:#8A9099;text-align:right}
+  .dfoot{height:42px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-top:1px solid #F4F5F7}
+  .empty{flex:1;display:flex;align-items:center;justify-content:center;color:#A3A9B2;font-size:13px}
+
+  .pv{width:400px;flex:0 1 400px;min-width:300px;display:flex;flex-direction:column}
+  .pvh{height:34px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-bottom:1px solid #EFF1F4}
+  .pvb{flex:1;overflow-y:auto;padding:16px;display:flex;justify-content:center}
+  .ph{width:300px;height:fit-content;background:#fff;border:1px solid #E7E9ED;border-radius:14px;overflow:hidden}
+  .phtop{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #F0F2F5}
+  .badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:#E7F6EC;color:#12A150;font-size:11.5px;font-weight:500}
+  .badge.st{background:#FBF0DC;color:#C77700}
+  .badge.of{background:#EEF0F3;color:#8A8F99}
+  .phname{padding:13px 14px 7px;font-size:13.5px;font-weight:500;line-height:1.45}
+  .phmeta{padding:0 14px 12px;font-size:11.5px;color:#9CA3AF}
+  .rows{padding:0 14px 14px}
+  .r{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center;height:34px;border-bottom:1px dashed #F0F2F5;font-size:12.5px}
+  .r:last-child{border-bottom:none}
+  .rk{color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rv{font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* 控制点（可写变量）：右列固定宽、绝不换行；变量名过长则省略号 */
+  .rctl{display:flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
+  /* 注意：类名不能用 .win —— 主容器 div.win#win 就是这个名字，会把 text-align:right 等污染到整站 */
+  .wnum{width:64px;height:24px;border:1px solid #DFE3E9;border-radius:6px;padding:0 6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums;flex:none}
+  .wnum:focus{outline:none;border-color:#1F4BB8}
+  .wbtn{height:24px;padding:0 8px;border:1px solid #C9D2E3;background:#F4F7FD;color:#1F4BB8;border-radius:6px;font-size:11.5px;cursor:pointer;white-space:nowrap;flex:none}
+  .wbtn:hover{background:#E8EFFC}
+  .wunit{color:#9CA3AF;font-size:11.5px;flex:none}
+  .shot{width:100%;border-radius:10px;display:block;background:#fff}
+  .phold{width:300px;padding:40px 18px;text-align:center;color:#9CA3AF;font-size:12.5px;line-height:1.8;border:1px dashed #E2E5EA;border-radius:14px}
+
+  .log{height:150px;flex:none;border-top:1px solid #EFF1F4;background:#FBFBFC;display:flex;flex-direction:column}
+  .logh{height:30px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;border-bottom:1px solid #F1F2F5}
+  .logb{flex:1;overflow-y:auto;padding:9px 16px;font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:11.5px;line-height:1.85;color:#4A5058}
+  .g{color:#12A150}.a{color:#C77700}.d2{color:#9CA3AF}
+  .stbar{height:30px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-top:1px solid #EFF1F4;font-size:11.5px;color:#8A9099}
+
+  /* ===== 次级视图（监控/巡站/日志/历史/账号/设置）===== */
+  .view{display:none;flex:1;min-height:0;flex-direction:column}
+  body[data-view="patrol"]   #viewPatrol,
+  body[data-view="accounts"] #viewAccounts,
+  body[data-view="watch"]    #viewWatch,
+  body[data-view="log"]      #viewLog,
+  body[data-view="history"]  #viewHistory,
+  body[data-view="alerts"]   #viewAlerts,
+  body[data-view="settings"] #viewSettings{display:flex}
+
+  /* 监控页右侧页签 */
+  .ptabs{display:flex;gap:4px}
+  .ptab{height:24px;padding:0 12px;border:none;border-radius:12px;background:transparent;color:#8A9099;font-size:11.5px;cursor:pointer}
+  .ptab:hover{background:#F1F2F5}
+  .ptab.on{background:#EAF1FE;color:#2F6BFF;font-weight:500}
+  .pvpane{flex:1;min-height:0;width:100%;overflow-y:auto;padding:16px;display:flex;justify-content:center}
+  .wstrip{flex:none;min-height:36px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:6px 20px;border-bottom:1px solid #EFF1F4;font-size:11.5px;color:#7B828C}
+  .wstrip b{font-weight:500;color:#3A4048}
+  .wstrip .bad{color:#D9383D}
+  .logview{flex:1;min-height:0;display:flex;flex-direction:column;background:#FBFBFC}
+  /* 异常提醒页 */
+  .albody{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+  .acard{flex:none;background:#fff;border:1px solid #EFF1F4;border-radius:12px;padding:14px 16px}
+  .achd{font-size:13px;font-weight:600;color:#3A4048;margin-bottom:10px}
+  .arow{display:flex;align-items:center;gap:10px;font-size:12.5px;color:#3A4048}
+  .ahint{font-size:11.5px;color:#9CA3AF;line-height:1.8;margin:8px 0 0}
+  /* 规则命中诊断：颜色直接说明「这条规则现在什么状态」，不用读文字 */
+  .dg-ok{color:#0E9F6E;font-weight:600}
+  .dg-wait{color:#B45309}
+  .dg-idle{color:#6B7280}
+  .dg-bad{color:#DC2626;font-weight:600}
+  .dg-off{color:#9CA3AF}
+  .acard .rtab{table-layout:fixed}
+  /* 应用内提醒横幅（.nbanner / #nbBox）已整段移除。
+     它只在窗口处于前台时显示、一轮命中多台时最多同时显示 3 条，切走窗口就收不到，
+     属于「软件内的推送」，用户明确表示不可信。现在全程序只有系统通知一条通道。 */
+  /* 历史折线图 */
+  .htop{flex:none;padding:10px 16px 2px;font-size:11.5px;color:#8A9099;max-height:240px;overflow-y:auto}
+  .hchip{height:26px;padding:0 10px;border-radius:13px;border:1px solid #E1E4E9;background:#fff;color:#3A4048;font-size:11.5px;cursor:pointer;margin:0 6px 6px 0;display:inline-flex;align-items:center;gap:5px}
+  .hchip .sw{width:9px;height:9px;border-radius:50%;flex:none}
+  .hchip.on{border-color:#2F6BFF;background:#EAF1FE;color:#2F6BFF}
+  #histBody{padding:8px;display:block}
+  .hwrap{width:100%;height:100%;display:flex;flex-direction:column}
+  .hchart{flex:1;min-height:0;position:relative}
+  #histCanvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  /* ===== 站点选择弹窗 ===== */
+  .mwrap{position:fixed;inset:0;background:rgba(17,20,26,.42);display:none;align-items:center;justify-content:center;z-index:50}
+  .mwrap.show{display:flex}
+  .mbox{width:470px;max-height:74vh;background:#fff;border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.18);display:flex;flex-direction:column;overflow:hidden}
+  .mhead{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #F0F2F5;font-size:14px;font-weight:600}
+  .mhead .x{cursor:pointer;color:#9CA3AF;font-size:15px;border:none;background:none;padding:2px 6px}
+  .mhint{padding:10px 18px 0;font-size:12.5px;color:#7B828C;line-height:1.5}
+  .mlist{flex:1;overflow-y:auto;padding:8px 10px;margin:8px 0 0}
+  .mgrp{padding:8px 12px 2px;font-size:11px;font-weight:600;color:#2F6BFF}
+  .mitem{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;font-size:12.5px;cursor:pointer;color:#3B424C}
+  .mitem:hover{background:#F4F6F9}
+  .mitem .no{color:#9CA3AF;font-size:11px;margin-left:auto;font-family:ui-monospace,Consolas,monospace}
+  .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #F0F2F5}
+  .mfoot .btn{flex:none;white-space:nowrap}
+  /* 关闭方式选择（关闭按钮时弹出）—— 与站点选择等弹窗同一套视觉 */
+  .cbox{width:452px}
+  .copt{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border:1px solid #E6E9ED;border-radius:10px;cursor:pointer;margin-top:9px;background:#fff;transition:border-color .12s,background .12s}
+  .copt:hover{border-color:#B9CBFB;background:#F7F9FF}
+  .copt.on{border-color:#2F6BFF;background:#F4F7FF}
+  .copt .cic{width:17px;height:17px;border-radius:50%;border:1.5px solid #C8CDD5;flex:none;margin-top:1px;position:relative;background:#fff}
+  .copt.on .cic{border-color:#2F6BFF;border-width:5px}
+  .copt .ct{font-size:13px;font-weight:600;color:#2B3138}
+  .copt .cd{font-size:11.5px;color:#8A9099;line-height:1.65;margin-top:3px}
+  .copt .cwarn{color:#C77700}
+  /* 往期截图清理列表 */
+  .brow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;cursor:pointer}
+  .brow:hover{background:#F7F8FA}
+  .brow.lk{opacity:.5;cursor:not-allowed}
+  .brow .bn{font-size:13px;color:#3A4048}
+  .brow .bm{margin-left:auto;font-size:12px;color:#8A9099;text-align:right;flex:none;padding-left:8px}
+  .panel{flex:1;overflow-y:auto;padding:22px 26px}
+  .ptit{font-size:15px;font-weight:600;margin:0 0 4px}
+  .psub{font-size:12px;color:#7B828C;margin:0 0 16px}
+  .card{border:1px solid #EDEFF2;border-radius:10px;padding:13px 15px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .card.off{opacity:.55}
+  .ahead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+  .ahead .ptit{margin:0 0 4px}
+  .ahead .psub{margin:0}
+  .accform{display:block}
+  .fgrid{display:flex;flex-wrap:wrap;gap:10px 14px}
+  .fgrid label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:#5A6472;min-width:150px;flex:1}
+  .fgrid input{height:30px;border:1px solid #DDE1E6;border-radius:7px;padding:0 9px;font-size:12.5px}
+  .fbtns{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
+  .card .nm{font-size:13.5px;font-weight:500}
+  .card .sub{font-size:12px;color:#7B828C;margin-top:3px}
+  .biglog{flex:1;overflow-y:auto;padding:14px 20px;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.8;color:#4A5058;background:#FBFBFC}
+  .row{display:flex;align-items:center;gap:10px;margin:14px 0;font-size:13px}
+  .row label{min-width:96px;color:#5A6472}
+  input[type=number]{width:72px;height:30px;border:1px solid #DDE1E6;border-radius:7px;padding:0 9px;font-size:13px}
+  .hint{font-size:11.5px;color:#9CA3AF;margin-left:6px}
+
+  /* ===== 报告页：左账号 / 右日志 ===== */
+  .rwrap{flex:1;display:flex;min-height:0}
+  .rlist{width:340px;flex:none;border-right:1px solid #E9EBEF;overflow-y:auto;padding:20px 16px;background:#FCFCFD}
+  .rlist .ptit{margin:0 4px 4px}
+  .rlist .psub{margin:0 4px 12px}
+  .rlist .empty{padding:14px 4px;color:#A3A9B2;font-size:12.5px}
+  .rlist .it{padding:11px 10px}
+  .rlogpane{flex:1;min-width:0;display:flex;flex-direction:column;background:#FBFBFC}
+  .rlogpane .logh{height:38px;background:#fff}
+  .rlogpane .logb{padding:12px 16px}
+  .rlogpane .logb .ph{color:#9CA3AF;padding:6px 0}
+
+  /* ===== 监控页 ===== */
+  .wwrap{flex:1;display:flex;min-height:0}
+  .wleft{width:412px;flex:none;border-right:1px solid #E9EBEF;display:flex;flex-direction:column;background:#FCFCFD}
+  .whead{padding:16px 16px 6px}
+  .whead .ptit{margin:0}
+  .whead .psub{margin:4px 0 0}
+  .wfilter{display:flex;gap:6px;padding:8px 16px 10px}
+  .wchip{font-size:11.5px;padding:3px 10px;border-radius:11px;background:#EFF1F4;color:#5A6472;cursor:pointer;border:none}
+  .wchip:hover{background:#E4E8EE}
+  .wchip.on{background:#2F6BFF;color:#fff}
+  .wbody{flex:1;overflow-y:auto;padding:0 12px 14px}
+  .anom{display:flex;gap:9px;padding:10px;border-radius:9px;margin-bottom:6px;background:#fff;border:1px solid #EDEFF2;cursor:pointer}
+  .anom:hover{background:#F8FAFE;border-color:#DCE3EE}
+  .anom.crit{border-left:3px solid #E5484D}
+  .anom.warn{border-left:3px solid #F5A524}
+  .anom .ai{flex:1;min-width:0}
+  .anom .an{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .anom .as{font-size:11.5px;color:#7B828C;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .anom .ad{font-size:11px;color:#A3A9B2;margin-top:3px}
+  .anom .anew{display:inline-block;font-size:10px;padding:0 5px;height:15px;line-height:15px;border-radius:4px;background:#FFE9E9;color:#C4302B;margin-left:5px}
+  .wside{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto;background:#fff}
+  .wcard{margin:16px;border:1px solid #EDEFF2;border-radius:10px;padding:14px 16px}
+  .wcard h4{margin:0 0 10px;font-size:13px;font-weight:500}
+  .wgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .wstat{background:#F7F8FA;border-radius:8px;padding:9px 10px;min-width:0}
+  .wstat .k{font-size:11px;color:#8A9099;white-space:nowrap}
+  .wstat .v{font-size:15px;font-weight:500;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wstat .v.big{color:#2F6BFF}
+  .wstat .v.warn{color:#C77700}
+  .wstat .v.crit{color:#D9383D}
+  .wrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .rtab{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+  .rtab th{text-align:left;font-weight:500;color:#7B828C;padding:6px 5px;border-bottom:1px solid #EFF1F4;font-size:11px}
+  .rtab td{padding:5px 4px;border-bottom:1px solid #F5F6F8;vertical-align:middle}
+  /* 变量名输入框下方的即时识别提示：能在保存前就告诉用户写对没有 */
+  .pthint{margin-top:3px;font-size:11px;line-height:1.4;word-break:break-all}
+  .pthint.ok{color:#1D9E75}
+  .pthint.bad{color:#C77700}
+  .rtab input[type=text],.rtab input[type=number],.rtab select{
+    width:100%;height:27px;border:1px solid #E1E4E9;border-radius:6px;padding:0 6px;font-size:11.5px;
+    font-family:inherit;color:#3A4048;background:#fff;box-sizing:border-box}
+  .rtab input:focus,.rtab select:focus{outline:none;border-color:#2F6BFF}
+  .rtab .cen{text-align:center}
+  .rtab .v2{display:flex;align-items:center;gap:3px}
+  .rtab .v2 input{width:0;flex:1 1 0;min-width:0}
+  .rtab .v2 span{flex:none;color:#B0B5BD;font-size:11px;line-height:1}
+  .rtab .x{border:none;background:none;color:#B0B5BD;font-size:14px;cursor:pointer;padding:0 4px}
+  .rtab .x:hover{color:#D9383D}
+  .rtab tr.off{opacity:.5}
+  .sw{position:relative;width:36px;height:20px;flex:none;border-radius:10px;background:#D5D9E0;border:none;padding:0;transition:background .15s;cursor:pointer}
+  .sw.on{background:#2F6BFF}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+  .sw.on::after{left:18px}
+
+  /* 首页监控条 */
+  .wbar{height:34px;flex:none;display:flex;align-items:center;gap:9px;padding:0 20px;background:#F4F7FE;border-bottom:1px solid #E4EBFA;font-size:12px;color:#4A5568}
+  .wbar.bad{background:#FFF5F5;border-bottom-color:#FBDDDD;color:#96393A}
+  .wbar .dot{width:7px;height:7px;border-radius:50%;flex:none;background:#12A150}
+  .wbar.bad .dot{background:#E5484D}
+  .wbar .gz{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .drow .wflag{display:inline-block;width:6px;height:6px;border-radius:50%;background:#E5484D;margin-right:6px;vertical-align:1px;flex:none}
+</style>
+
+<div id="stage"><div class="win" id="win">
+
+  <!-- 左侧导航 -->
+  <nav class="rail">
+    <div class="logo">巡</div>
+    <button class="ic on" data-view="watch" title="数据监控">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5h3.4l2.2-6.2 3.6 12.4 2.4-8.4 1.7 4h4.7"/></svg>
+    </button>
+    <button class="ic" data-view="patrol" title="巡站截图">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.6"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <button class="ic" data-view="history" title="历史数据">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"/></svg>
+    </button>
+    <button class="ic" data-view="alerts" title="异常提醒">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 6-2.5 7-2.5 7h17S18 15 18 9z"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>
+    </button>
+    <button class="ic" data-view="accounts" title="账号">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="8.2" r="3.4"/><path d="M5 20c0-3.3 3.1-5.6 7-5.6s7 2.3 7 5.6"/></svg>
+    </button>
+    <button class="ic" data-view="log" title="运行日志">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13.5h6M9 17h4"/></svg>
+    </button>
+    <div class="railsp"></div>
+    <button class="ic" data-view="settings" title="设置">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 8h9M19 8h1M4 16h3M13 16h7"/><circle cx="16" cy="8" r="2.2"/><circle cx="10" cy="16" r="2.2"/></svg>
+    </button>
+  </nav>
+
+  <!-- 中间账号列表 -->
+  <aside class="col">
+    <div class="srch">
+      <div class="sbox">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <input id="accQ" placeholder="搜索账号" autocomplete="off" spellcheck="false" oninput="onAccQ()">
+      </div>
+      <button class="addbtn" title="新增账号（编辑 accounts.csv）" onclick="editAccounts()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg>
+      </button>
+    </div>
+    <div class="items" id="accList"></div>
+    <div class="lfoot">
+      <span id="accFoot">— 个账号</span>
+      <a class="lk" onclick="editAccounts()">编辑账号表格</a>
+    </div>
+  </aside>
+
+  <!-- 主区：巡站视图 -->
+  <main class="main">
+    <section class="view" id="viewPatrol">
+      <header class="bar">
+        <div>
+          <h3 class="tit" id="barT">有人云巡站客户端</h3>
+          <p class="bsub" id="barSub">勾选左侧账号开始截图</p>
+        </div>
+        <div class="acts">
+          <input id="devQP" placeholder="搜索站点…" oninput="onDevQ('devList')"
+            style="height:32px;width:150px;border:1px solid #E1E4E9;border-radius:8px;padding:0 10px;font-size:12px;color:#3A4048">
+          <button class="btn" id="btnPick" onclick="pickStations()">选择站点</button>
+          <button class="btn" id="btnClean" onclick="openBatchModal()" title="清理往期截图批次及其压缩包">清理往期</button>
+          <button class="btn" id="btnPause" onclick="pauseRun()" disabled>暂停</button>
+          <button class="btn pri" id="btnRun" onclick="startRun()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2l11 6.8-11 6.8z"/></svg>
+            开始截图
+          </button>
+        </div>
+      </header>
+
+      <div class="midarea">
+        <section class="dlist">
+          <div class="dhead"><span class="s" data-k="name">设备<i>⇅</i></span><span class="s" data-k="status">状态<i>⇅</i></span><span class="s" data-k="age">数据时间<i>⇅</i></span></div>
+          <div class="dbody" id="devList"><div class="empty">选择账号后加载设备列表…</div></div>
+          <div class="dfoot">
+            <span id="devFoot">共 0 台</span>
+            <span>单击查看截图</span>
+          </div>
+        </section>
+
+        <section class="pv">
+          <div class="pvh">
+            <span>截图预览</span>
+            <span><a class="lk" onclick="openShotDir()">打开文件夹</a><a class="lk" id="pvOpen" style="margin-left:12px" onclick="openShot()">打开原图</a></span>
+          </div>
+          <div class="pvb" id="pvBody">
+            <div class="phold">运行巡站后，这里显示站点截图。<br>单击左侧设备可预览其最新一张。</div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="stbar">
+        <span id="stLeft">就绪 · 勾选账号后点「开始截图」</span>
+        <span id="stRight">上次批次 —</span>
+      </footer>
+    </section>
+
+    <!-- 日志视图：整页运行日志 -->
+    <section class="view" id="viewLog">
+      <div class="logview">
+        <div class="logh"><span>运行日志</span><span>自动滚动 · 可复制 · 本次启动以来</span></div>
+        <div class="logb" id="logBody"></div>
+      </div>
+    </section>
+
+    <!-- 监控视图：数据监控（左设备实时列表 / 右实时数据·异常·规则） -->
+    <section class="view" id="viewWatch">
+      <header class="bar">
+        <div>
+          <h3 class="tit" id="wTitle">数据监控</h3>
+          <p class="bsub" id="wSub2">加载中…</p>
+        </div>
+        <div class="acts">
+          <input id="devQW" placeholder="搜索站点…" oninput="onDevQ('devListW')"
+            style="height:32px;width:150px;border:1px solid #E1E4E9;border-radius:8px;padding:0 10px;font-size:12px;color:#3A4048">
+          <select id="wIvSel" onchange="watchInterval(this.value)" style="height:32px;border:1px solid #E1E4E9;border-radius:8px;padding:0 6px;font-size:12px;color:#3A4048">
+            <option value="300">5 分钟/轮</option>
+            <option value="600">10 分钟/轮</option>
+            <option value="900" selected>15 分钟/轮</option>
+            <option value="1800">30 分钟/轮</option>
+            <option value="3600">1 小时/轮</option>
+          </select>
+          <button class="btn" id="wToggleBtn" onclick="watchToggleBtn()">暂停监控</button>
+          <button class="btn pri" id="btnScan" onclick="watchScan()">立即巡检</button>
+        </div>
+      </header>
+      <div class="wstrip" id="wStats"><span>加载中…</span></div>
+      <div class="midarea">
+        <section class="dlist">
+          <div class="dhead"><span class="s" data-k="name">设备<i>⇅</i></span><span class="s" data-k="status">状态<i>⇅</i></span><span class="s" data-k="age">数据时间<i>⇅</i></span></div>
+          <div class="dbody" id="devListW"><div class="empty">选择账号后加载…</div></div>
+          <div class="dfoot"><span id="devFootW">共 0 台</span><span>单击查看实时数据</span></div>
+        </section>
+        <section class="pv">
+          <div class="pvh">
+            <span class="ptabs">
+              <button class="ptab on" onclick="wTab('live')">实时数据</button>
+              <button class="ptab" onclick="wTab('anom')">异常提醒 <span id="wAnomN">0</span></button>
+              <button class="ptab" onclick="setView('alerts')" title="到「异常提醒」页管理规则">提醒规则 →</button>
+            </span>
+          </div>
+          <div class="pvb" style="padding:0;display:flex;flex-direction:column">
+            <div class="pvpane" id="pvBodyW"><div class="phold">单击左侧设备查看实时数据。</div></div>
+            <div class="pvpane" id="anomPane" style="display:none;flex-direction:column;padding:0">
+              <div class="wfilter" style="flex:none">
+                <button class="wchip on" data-f="all" onclick="wFilter('all')">全部</button>
+                <button class="wchip" data-f="new" onclick="wFilter('new')">新告警</button>
+                <button class="wchip" data-f="crit" onclick="wFilter('crit')">严重</button>
+              </div>
+              <div class="wbody" id="anomList"><div class="empty">加载中…</div></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- 历史数据视图：左设备 / 右折线图 -->
+    <section class="view" id="viewHistory">
+      <header class="bar">
+        <div>
+          <h3 class="tit">历史数据</h3>
+          <p class="bsub" id="hSub">选择设备与变量，查看温度 / 压力等趋势（数据来自有人云历史库，按需拉取）</p>
+        </div>
+        <div class="acts">
+          <input id="devQH" placeholder="搜索站点…" oninput="onDevQ('devListH')"
+            style="height:32px;width:150px;border:1px solid #E1E4E9;border-radius:8px;padding:0 10px;font-size:12px;color:#3A4048">
+          <select id="hSrc" onchange="histReload()" style="height:32px;border:1px solid #E1E4E9;border-radius:8px;padding:0 6px;font-size:12px;color:#3A4048">
+            <option value="local" selected>本地记录</option>
+            <option value="cloud">云端历史</option>
+          </select>
+          <select id="hRange" onchange="histReload()" style="height:32px;border:1px solid #E1E4E9;border-radius:8px;padding:0 6px;font-size:12px;color:#3A4048">
+            <option value="24">近 24 小时</option>
+            <option value="72">近 3 天</option>
+            <option value="168" selected>近 7 天</option>
+            <option value="720">近 30 天</option>
+          </select>
+          <button class="btn" onclick="histReload()">刷新</button>
+          <button class="btn" id="btnHistSave" onclick="histSave()">保存到本地</button>
+        </div>
+      </header>
+      <div class="midarea">
+        <section class="dlist">
+          <div class="dhead"><span class="s" data-k="name">设备<i>⇅</i></span><span class="s" data-k="status">状态<i>⇅</i></span><span class="s" data-k="age">数据时间<i>⇅</i></span></div>
+          <div class="dbody" id="devListH"><div class="empty">选择账号后加载…</div></div>
+          <div class="dfoot"><span id="devFootH">共 0 台</span><span>单击画折线图</span></div>
+        </section>
+        <section class="pv" style="width:520px">
+          <div class="pvh"><span>折线图</span><span id="histMeta"></span></div>
+          <div class="pvb" id="histBody">
+            <div class="phold">单击左侧设备查看历史趋势。<br>数据来自平台历史库，与实时监控互不影响。</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- 异常提醒视图：全局提醒规则管理（独立页，全宽表格） -->
+    <section class="view" id="viewAlerts">
+      <header class="bar">
+        <div>
+          <h3 class="tit">异常提醒</h3>
+          <p class="bsub">全局生效（不分账号）· 每条规则可用「账号 / 设备名 / 变量名」收窄范围，填 * 表示全部</p>
+        </div>
+        <div class="acts">
+          <button class="btn" onclick="notifyTest()" title="发一条测试提醒，验证当前提醒方式是否生效">发送测试提醒</button>
+          <button class="btn pri" onclick="ruleSave()">保存规则</button>
+        </div>
+      </header>
+      <div class="albody">
+        <div class="acard">
+          <div class="achd">提醒方式 <span class="hint" style="margin-left:8px">改动即保存，立即生效</span></div>
+          <div class="arow" style="flex-wrap:wrap">
+            <button type="button" class="wchip" data-m="off" onclick="setNotifyMode('off')">不提醒</button>
+            <button type="button" class="wchip" data-m="flash" onclick="setNotifyMode('flash')">任务栏闪烁</button>
+            <button type="button" class="wchip" data-m="toast" onclick="setNotifyMode('toast')">系统通知</button>
+            <button type="button" class="wchip" data-m="both" onclick="setNotifyMode('both')">两者都开</button>
+            <span class="hint" id="alNotifyMsg"></span>
+          </div>
+          <p class="ahint" id="alHintMain">监控每轮巡检发现<b>新异常</b>或<b>异常恢复</b>时提醒一次，<b>一轮命中几台就提醒几条</b>，软件在前台或在后台都一样发系统通知。数据监控页的「异常提醒」列表仍保留全部历史异常，不受影响。</p>
+          <p class="ahint" id="alHealth" style="margin-top:6px"></p>
+        </div>
+        <div class="acard">
+          <div class="achd">重复提醒 <span class="hint" style="margin-left:8px">点一下即生效，自动保存</span></div>
+          <div class="arow" style="flex-wrap:wrap;align-items:flex-start">
+            <span class="hint" style="margin:0 10px 0 0">每条规则命中时</span>
+            <button type="button" class="wchip" data-rm="change" onclick="setRepeatMode('change')">只在状态变化时提醒</button>
+            <button type="button" class="wchip" data-rm="always" onclick="setRepeatMode('always')">每次巡检都提醒</button>
+          </div>
+          <div class="arow" style="flex-wrap:wrap;align-items:flex-start;margin-top:8px">
+            <span class="hint" style="margin:0 10px 0 0">同设备重复间隔</span>
+            <button type="button" class="wchip" data-rg="0" onclick="setRepeatGap(0)">不限制</button>
+            <button type="button" class="wchip" data-rg="30" onclick="setRepeatGap(30)">30分</button>
+            <button type="button" class="wchip" data-rg="60" onclick="setRepeatGap(60)">60分</button>
+            <button type="button" class="wchip" data-rg="180" onclick="setRepeatGap(180)">180分</button>
+            <button type="button" class="wchip" data-rg="360" onclick="setRepeatGap(360)">360分</button>
+          </div>
+          <p class="ahint" style="margin-top:6px"><b>这两组设置管的是不同阶段：</b><br>
+            · <b>首次提醒</b>不需要任何等待——本轮读到的数据一旦越过阈值就立刻提醒。<br>
+            · 上面的选项管的是<b>故障已经在报了以后</b>：选「每次巡检都提醒」则每轮都再报一次，
+              同一台设备也照报；选「只在状态变化时提醒」则只在故障新出现或恢复正常时报。<br>
+            担心数值抖动导致误报，用条件选<b>「区间内」</b>并把上下限留出余量，比加时间确认更直接。
+          </p>
+        </div>
+        <div class="acard">
+          <div class="achd">内置规则 <span class="hint" style="margin-left:8px">所有账号通用 · 开关点一下即生效，阈值改完点右上角「保存规则」</span></div>
+          <div class="arow" style="flex-wrap:wrap;margin-bottom:4px">
+            <span class="hint" style="margin:0 10px 0 0">离线 / 数据停更 / 采集异常 是否推送</span>
+            <button type="button" class="wchip" data-nb="1" onclick="setNotifyBuiltin(true)">推送提醒</button>
+            <button type="button" class="wchip" data-nb="0" onclick="setNotifyBuiltin(false)">不推送（只推自定义规则）</button>
+          </div>
+          <p class="ahint" style="margin:0 0 8px">选「不推送」时：设备离线 / 数据停更 / 采集异常不再单独发系统通知，
+            这些异常仍照常显示在「数据监控」页，只是不再打扰你；下方<b>自定义规则</b>命中的提醒不受影响。</p>
+          <div class="arow" id="alStale"><span class="hint">加载中…</span></div>
+        </div>
+        <div class="acard">
+          <div class="achd">自定义规则 <span class="hint" id="alMsg"></span></div>
+          <div id="alRuleBox"><div class="empty">加载中…</div></div>
+          <div class="arow" style="margin-top:10px">
+            <button class="btn" onclick="ruleAdd()">＋ 添加规则</button>
+            <span class="hint">删除：每行最右侧的 ✕；停用：去掉行首勾选。账号 / 设备名直接选，变量名可选可填（支持 * 通配）。条件选「区间内」时阈值填两个数，判定为<b>大于左值且小于右值</b>（两端都不含）。设备读回来的只有纯数字，无需填单位。所有改动需点右上角「保存规则」才生效。</span>
+          </div>
+          <div id="alDiagBox" style="margin-top:12px"></div>
+        </div>
+      </div>
+      <datalist id="alPts"></datalist>
+    </section>
+
+    <!-- 账号视图 -->
+    <section class="view" id="viewAccounts"><div class="panel" id="accountsPanel">
+      <h3 class="ptit">账号管理</h3>
+      <p class="psub">账号来自工具目录下的 accounts.csv，点击「编辑账号表格」用默认程序打开。本工具理论支持且只支持由有人云平台分发的账号。</p>
+    </div></section>
+
+
+    <!-- 设置视图 -->
+    <section class="view" id="viewSettings"><div class="panel">
+      <h3 class="ptit">设置</h3>
+      <p class="psub">本机运行参数。</p>
+      <div class="row"><label>并发线程</label><input type="number" id="setWorkers" min="1" max="8" value="4"><span class="hint">1–8，建议 4</span></div>
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:5px">关闭按钮</label>
+        <div>
+          <div class="arow" style="flex-wrap:wrap">
+            <span class="hint" style="margin:0 10px 0 0">点关闭时</span>
+            <button type="button" class="wchip" data-cm="ask" onclick="setCloseMode('ask')">每次都弹窗询问</button>
+            <button type="button" class="wchip" data-cm="tray" onclick="setCloseMode('tray')">直接收到托盘图标</button>
+            <button type="button" class="wchip" data-cm="exit" onclick="setCloseMode('exit')">直接关闭程序</button>
+          </div>
+          <p class="ahint" id="setCloseMsg" style="margin:7px 0 0">选「收到托盘图标」时巡检与异常提醒继续在后台运行；默认每次都问，不会擅自把程序留在后台。</p>
+        </div>
+      </div>
+      <div class="row"><label>往期批次</label><span class="hint" style="margin-left:0">每个批次跑完都会保留，程序不会自动删除；需要腾空间请到巡站页点「清理往期」勾选删除。</span></div>
+      <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
+        <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.0（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
+    </div></section>
+  </main>
+
+  <!-- 站点选择弹窗 -->
+  <div class="mwrap" id="siteModal">
+    <div class="mbox">
+      <div class="mhead"><span id="smTitle">选择站点</span><button class="x" onclick="closeSiteModal()" title="关闭">✕</button></div>
+      <div class="mhint">勾选这次要巡的站点（不勾默认全部）；选择按账号分别记忆。</div>
+      <div class="mlist" id="smList"></div>
+      <div class="mfoot">
+        <button class="btn" onclick="smAll(true)">全选</button>
+        <button class="btn" onclick="smAll(false)">全不选</button>
+        <button class="btn pri" onclick="smOk()">确定</button>
+      </div>
+    </div>
+  </div>
+  <!-- 往期截图清理弹窗 -->
+  <div class="mwrap" id="batchModal">
+    <div class="mbox">
+      <div class="mhead"><span>清理往期截图</span><button class="x" onclick="closeBatchModal()" title="关闭">✕</button></div>
+      <div class="mhint">往期批次<b>不会自动清理</b>，都给你留着；勾选要删的批次手动删，删除时<b>对应的压缩包会一并删除</b>，最新批次不可选。</div>
+      <div class="mlist" id="bmList"></div>
+      <div class="mfoot" style="flex-direction:column;align-items:stretch;gap:8px">
+        <span id="bmSum" style="font-size:12px;color:#8A9099;text-align:left"></span>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn" onclick="bmAll(true)">全选</button>
+          <button class="btn" onclick="bmAll(false)">全不选</button>
+          <button class="btn" onclick="closeBatchModal()">取消</button>
+          <button class="btn" id="bmDel" onclick="bmDelete()" style="color:#D9383D;border-color:#F3C9CB">删除选中</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 控制下发确认弹窗：写入数值 / 开关前必须二次确认（页面内弹窗，不用原生 confirm） -->
+  <div class="mwrap" id="ctrlModal">
+    <div class="mbox" style="width:360px">
+      <div class="mhead"><span>确认下发控制指令</span><button class="x" onclick="ctrlCancel()" title="关闭">✕</button></div>
+      <div class="mhint" style="color:#C77700">确认后将<b>立即下发到真实设备</b>，请核对下面每一项无误。</div>
+      <div class="mlist" id="ctrlBody" style="font-size:12.5px;line-height:2.1"></div>
+      <div class="mfoot">
+        <button class="btn" onclick="ctrlCancel()">取消</button>
+        <button class="btn pri" onclick="ctrlOk()">确认下发</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关闭窗口时的选择：Electron 侧拦截 close 后调 window.__askClose() 打开 -->
+  <div class="mwrap" id="closeModal">
+    <div class="mbox cbox">
+      <div class="mhead"><span>关闭窗口后要做什么？</span></div>
+      <div style="padding:12px 18px 4px">
+        <div class="copt" id="coTray" onclick="pickClose('tray')">
+          <span class="cic"></span>
+          <span>
+            <span class="ct">收到托盘图标</span>
+            <span class="cd">窗口隐藏，图标留在右下角托盘。<b>巡检监控与异常提醒继续在后台运行</b>，双击托盘图标可重新打开。</span>
+          </span>
+        </div>
+        <div class="copt" id="coExit" onclick="pickClose('exit')">
+          <span class="cic"></span>
+          <span>
+            <span class="ct">直接关闭程序</span>
+            <span class="cd cwarn">完全退出，后台巡检与提醒<b>一并停止</b>。下次要监控需重新打开软件。</span>
+          </span>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;margin:13px 0 0;font-size:12px;color:#5A6472;cursor:pointer">
+          <input type="checkbox" id="coRemember" style="width:14px;height:14px;accent-color:#2F6BFF">
+          记住我的选择，以后点关闭按钮不再询问
+        </label>
+      </div>
+      <div class="mfoot">
+        <button class="btn" onclick="pickClose('cancel')">取消</button>
+        <button class="btn pri" id="coOk" onclick="pickClose('__ok')">确定</button>
+      </div>
+    </div>
+  </div>
+
+</div></div>
+
+<script>
+(function () {
+  var $ = function (s, r) { return (r || document).querySelector(s); };
+  var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
+  var ACCOUNTS = [], SEL = null, LOG_SINCE = 0, POLL = null, PV_PATH = null, DEMO = false;
+  var AUTO_SHOT = false;              // 截图完成后自动展示第一张有图的设备
+  var AUTO_PICK = {};                 // listId -> 已自动选中的账号（每个账号只在首次加载时自动选一条）
+  var NAV_TARGET = null;              // 「点系统通知跳转到站点」的目标：跨账号切换时，优先级高于「自动选中第一台」
+  // CUR_DEVS 里现在装的是「哪个账号」的列表。切账号后旧列表还留着（里面带 _acc，看着像目标账号的设备），
+  // 不记这一笔，「点通知跳转」就会拿旧列表提前认定成功，随后真列表到达又被自动选中第一台覆盖。
+  var DEVS_READY_SEL = null;
+  var CUR_DEVS = [], SITE_SEL = {}, PV_LIVE = null, LIVE_VALS = [];   // 当前账号设备列表 / 按账号记忆的勾选站点 / 预览区实时卡 / 实时卡变量(含可写信息)
+  var PAL = ['#2F6BFF', '#12A19A', '#D97A29', '#7C5CFF', '#E0518A', '#2F9E44'];
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); }
+  function avColor(i) { return PAL[i % PAL.length]; }
+  function ini(name) { return (name || '?').slice(0, 1); }
+  function api(p, opts) {
+    return fetch(p, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}))
+      .then(function (r) { return r.json(); }).catch(function () { return { ok: false, msg: '离线' }; });
+  }
+  function toast(msg) { try { console.log(msg); } catch (e) {} }
+
+  // ---------- 自适应（画布严格等于窗口可用区）----------
+  // 之前只算宽度、高度在 CSS 里写死 760px、宽度还有 maxW 上限 → 窗口放大后画布不动，只多出灰边。
+  // 现在：窗口 = 画布（宽高都跟着窗口长），窗口小于基准 1180×760 时才整页等比缩小。
+  // 所以窗口放大 = 画布真的变大，拖到哪铺到哪，不会再出现“空着一大块”。
+  var BASE_W = 1180, BASE_H = 760;
+  function fit() {
+    var stage = $('#stage'), win = $('#win');
+    var availW = Math.max(320, stage.clientWidth);
+    var availH = Math.max(320, stage.clientHeight);
+    var s = Math.min(1, availW / BASE_W, availH / BASE_H);   // 只缩不放，字号保持原始比例
+    if (!(s > 0.05)) s = 0.05;
+    win.style.width = Math.round(availW / s) + 'px';
+    win.style.height = Math.round(availH / s) + 'px';
+    win.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fit);
+  fit();
+
+  // ---------- 账号列表 ----------
+  function loadAccounts() {
+    return api('/api/accounts').then(function (j) {
+      if (j && j.ok && (j.accounts || []).length) {
+        ACCOUNTS = j.accounts;
+        renderAccounts();
+        var b = j.batch ? j.batch.replace('_截图', '').replace(/(\d{8})_(\d{6})/, '$1 $2') : '无';
+        $('#stRight').textContent = '上次批次 ' + b;
+        if (!SEL) selectAccount('__ALL__');   // 默认选中「全部账号」
+      } else if (j && j.ok) {
+        // 后端在跑、只是账号表里还没有可用账号（例如刚装好的空账号分发版）
+        // → 显示空态引导，不回落演示数据，免得把设计稿数据当成真实设备
+        ACCOUNTS = []; DEMO = false;
+        renderAccounts();
+        ['devList', 'devListW', 'devListH'].forEach(function (id) {
+          var el = $('#' + id);
+          if (el) el.innerHTML = '<div class="empty">还没有账号 —— 到左侧「账号」页点「＋ 新增账号」，'
+            + '填好名称 / 手机号 / 密码 / 平台ID 后即可开始巡检</div>';
+        });
+        var _sr = $('#stRight'); if (_sr) _sr.textContent = '还没有账号';
+        var _bt = $('#barT'); if (_bt) _bt.textContent = '还没有账号';
+        var _bs = $('#barSub'); if (_bs) _bs.textContent = '0 个账号 · 请先添加账号';
+      } else {
+        loadDemo();               // 无后端（file:// 预览或服务未起）→ 回落演示数据，外观与设计稿一致
+      }
+    });
+  }
+  /* 账号搜索关键字（左下角「搜索账号」）。
+     只筛左边账号列表「显示什么」，不动 SEL、也不动右侧设备列表 ——
+     这是「找账号」，不是「切账号」；选中状态从来不因为搜索被改掉。 */
+  var KW_ACC = '';
+  function accHit(name, sub) {
+    if (!KW_ACC) return true;
+    return (String(name) + ' ' + String(sub || '')).toLowerCase().indexOf(KW_ACC) >= 0;
+  }
+  function onAccQ() {
+    var i = $('#accQ');
+    var v = ((i && i.value) || '').trim().toLowerCase();
+    if (v === KW_ACC) return;
+    KW_ACC = v;
+    renderAccounts();
+  }
+  function renderAccounts() {
+    var el = $('#accList'); el.innerHTML = '';
+    var shown = 0;
+    // 「全部账号」聚合条目：设备合并展示，巡站一次跑全部账号
+    var allTotal = ACCOUNTS.reduce(function (s, a) { return s + (a.last ? a.last.total : 0); }, 0);
+    if (accHit('全部账号', ACCOUNTS.length + ' 个账号')) {
+      var itAll = document.createElement('div');
+      itAll.className = 'it' + (SEL === '__ALL__' ? ' on' : '');
+      itAll.innerHTML = '<div class="av" style="background:#2F6BFF">全</div>'
+        + '<div class="imid"><div class="nm">全部账号</div><div class="sub">'
+        + ACCOUNTS.length + ' 个账号' + (allTotal ? ' · 共 ' + allTotal + ' 台' : '') + '</div></div>'
+        + '<div class="irt"></div>';
+      itAll.onclick = function () { selectAccount('__ALL__'); };
+      el.appendChild(itAll);
+      shown++;
+    }
+    ACCOUNTS.forEach(function (a, i) {
+      var last = a.last;
+      var sub = last ? (last.total + ' 台 · 在线 ' + last.online + ' · 离线 ' + last.offline) : '未巡站';
+      if (!accHit(a.name, sub)) return;
+      var it = document.createElement('div');
+      it.className = 'it' + (a.name === SEL ? ' on' : '');
+      it.dataset.name = a.name;
+      var tm = last && last.run_at ? last.run_at.slice(11, 16) : '';
+      var badge = last ? '<div class="bdg' + (a.name === SEL ? ' hot' : '') + '">' + last.total + '</div>' : '';
+      it.innerHTML = '<div class="av" style="background:' + avColor(i) + '">' + esc(ini(a.name)) + '</div>'
+        + '<div class="imid"><div class="nm">' + esc(a.name) + '</div><div class="sub">' + esc(sub) + '</div></div>'
+        + '<div class="irt"><div class="tm">' + esc(tm) + '</div>' + badge + '</div>';
+      it.onclick = function () { selectAccount(a.name); };
+      el.appendChild(it);
+      shown++;
+    });
+    /* 搜不到时给一句话，别留一片空白让人以为账号没了 */
+    if (!shown) {
+      el.innerHTML = '<div class="empty">没有匹配「' + esc(KW_ACC) + '」的账号</div>';
+    }
+    var totalDev = ACCOUNTS.reduce(function (s, a) { return s + (a.last ? a.last.total : 0); }, 0);
+    $('#accFoot').textContent = ACCOUNTS.length + ' 个账号' + (totalDev ? ' · 共 ' + totalDev + ' 台' : '');
+  }
+  function withAcc(d, acc) { var c = Object.assign({}, d); c._acc = acc; return c; }
+  var WDEVS = [], DEVS_CACHE = {};    // 监控页实时列表 / 设备列表 60s 缓存
+  var LAST_RUN_SEEN = null;           // 上一轮巡检时间戳（变化说明跑完一轮）
+  function devTargets(v) {
+    if (v === 'watch') return ['devListW', 'devFootW'];
+    if (v === 'history') return ['devListH', 'devFootH'];
+    return ['devList', 'devFoot'];
+  }
+  function kwFilter(devs) {           // 选中具体账号时只显示白名单内；全部账号显示全部
+    if (SEL === '__ALL__') return devs;
+    var a = ACCOUNTS.filter(function (x) { return x.name === SEL; })[0];
+    var kws = (a && a.kw) ? a.kw : [];
+    if (!kws.length) return devs;
+    return devs.filter(function (d) {
+      var nm = d.name || '';
+      return kws.some(function (k) { return nm.indexOf(k) >= 0; });
+    });
+  }
+  /* ===================== 设备列表排序 =====================
+     为什么会「跳来跳去」：列表顺序原来完全跟着 /api/devices 返回的顺序走。
+     那个顺序在服务端会变（每轮巡检后重新拼、异常设备被提到最前），
+     所以用户看到的是一排站点自己换位置，想找的那台永远抓不住。
+     现在：所有列表渲染前统一排一次序，默认「站名」升序（拼音），
+     点表头切换列与升降序，选择记进 localStorage，重启后还是上次那种。
+
+     排序放在 renderDevices 入口做（三个列表共用），好处是
+     box.children[i] 与 devs[i] 永远一一对应 —— 「自动选中第一台」
+     「挑第一台有截图的」这些按下标取行的逻辑不会错位。 */
+  var SORT = { k: 'name', dir: 1 };
+  try {
+    var _sv = JSON.parse(localStorage.getItem('usrcloud_devsort') || 'null');
+    if (_sv && (_sv.k === 'name' || _sv.k === 'status' || _sv.k === 'age')
+      && (_sv.dir === 1 || _sv.dir === -1)) {
+      SORT = { k: _sv.k, dir: _sv.dir };
+    }
+  } catch (e) { }
+  function saveSort() {
+    try { localStorage.setItem('usrcloud_devsort', JSON.stringify(SORT)); } catch (e) { }
+  }
+
+  /* 中文站名不能用 < 比大小（那是按 UTF-16 码点，跟拼音毫无关系）。
+     Electron 自带 ICU，Intl.Collator('zh-Hans-CN') 就是拼音序；
+     取不到时退回字符串比较，至少是稳定的。 */
+  var _COLL = null;
+  try { _COLL = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' }); } catch (e) { _COLL = null; }
+  function nameCmp(a, b) {
+    var x = a.name || a.no || '', y = b.name || b.no || '';
+    if (_COLL) {
+      var r = _COLL.compare(x, y);
+      if (r) return r;
+      return _COLL.compare(a.no || '', b.no || '');   // 跨账号同名站：用设备号兜底，顺序仍稳定
+    }
+    return x < y ? -1 : (x > y ? 1 : 0);
+  }
+  /* 状态排序：越「要处理」的排越前（升序时）。
+     值是平台直接给的文案，采集异常最严重，在线最没事。
+     没有状态的（未巡）排在离线之后、在线之前。 */
+  var ST_RANK = { '采集异常': 0, '数据陈旧': 1, '离线': 2, '未巡': 3, '在线': 4 };
+  function stRank(d) {
+    var r = ST_RANK[d.status];
+    return r === undefined ? 3.5 : r;
+  }
+  /* 「距今多少分钟」。
+     后端 live 时给 age_min 最好；给不了就退回落盘报告里的文案
+     （刚刚 / 2 分钟前 / 10.0 天前 / 无数据时间）。
+     解析不出来的一律 Infinity 排最后 —— 一条脏数据不该把整个顺序搅乱。 */
+  function ageMin(d) {
+    if (typeof d.age_min === 'number') return d.age_min;
+    var s = String(d.age == null ? '' : d.age).trim();
+    if (!s) return Infinity;
+    if (s === '刚刚') return 0;
+    var m = s.match(/([\d.]+)\s*(天|小时|分钟|秒)/);
+    if (!m) return Infinity;
+    var v = parseFloat(m[1]);
+    if (m[2] === '天') return v * 1440;
+    if (m[2] === '小时') return v * 60;
+    if (m[2] === '秒') return v / 60;
+    return v;
+  }
+  var CMP = {
+    name: nameCmp,
+    status: function (a, b) { return stRank(a) - stRank(b); },
+    age: function (a, b) { return ageMin(a) - ageMin(b); }
+  };
+  function sortDevs(devs) {
+    var f = CMP[SORT.k] || CMP.name, dir = SORT.dir;
+    return (devs || []).slice().sort(function (a, b) {
+      var r = f(a, b);
+      /* 主键相等时一律按站名兜底：这样任意两次渲染的顺序完全一致，
+         不会出现「同样两台设备，这次 A 在前下次 B 在前」的抖动。 */
+      if (!r) r = nameCmp(a, b);
+      return r * dir;
+    });
+  }
+  /* 表头小箭头：只有排序列是实心的，其余给个淡色 ⇅ 提示可点 */
+  function paintSortHead() {
+    $$('.dhead .s').forEach(function (s) {
+      var on = s.dataset.k === SORT.k;
+      s.classList.toggle('on', on);
+      var i = s.querySelector('i');
+      if (i) i.textContent = on ? (SORT.dir === 1 ? '▲' : '▼') : '⇅';
+    });
+  }
+  function clickSort(k) {
+    if (SORT.k === k) SORT.dir = -SORT.dir;      // 点同一列：升降序对调
+    else { SORT.k = k; SORT.dir = 1; }
+    saveSort();
+    paintSortHead();
+    /* 用 60 秒缓存重画当前列表，不为了改个顺序再打一次接口 */
+    refreshDevices(false);
+  }
+  /* 表头点一下排序。用事件委托：表头是静态 HTML，而列表每轮轮询都会重画，
+     直接绑到元素上会随重画一起丢掉（这个坑列表行上已经踩过一次）。 */
+  document.addEventListener('click', function (e) {
+    var t = (e.target && e.target.closest) ? e.target.closest('.dhead .s') : null;
+    if (t && t.dataset && t.dataset.k) clickSort(t.dataset.k);
+  });
+
+  function refreshDevices(force) {
+    var v = document.body.dataset.view;
+    if (v !== 'patrol' && v !== 'watch' && v !== 'history') return;
+    if (!SEL) return;
+    var live = v !== 'patrol';            // 巡站页拿纯快照，与监控页彻底分开
+    var tgt = devTargets(v);
+    var key = SEL + '|' + live;
+    var c = DEVS_CACHE[key];
+    if (!force && c && Date.now() - c.t < 60000) { renderDevices(c.devs, tgt[0], tgt[1], live); return; }
+    var load = function (devs) { DEVS_CACHE[key] = { t: Date.now(), devs: devs }; renderDevices(devs, tgt[0], tgt[1], live); };
+    if (DEMO) {
+      var md = [];
+      if (SEL === '__ALL__') ACCOUNTS.forEach(function (a) { (DEMO_DEVS[a.name] || []).forEach(function (d) { md.push(withAcc(d, a.name)); }); });
+      else (DEMO_DEVS[SEL] || []).forEach(function (d) { md.push(withAcc(d, SEL)); });
+      load(md); return;
+    }
+    if (SEL === '__ALL__') {
+      Promise.all(ACCOUNTS.map(function (a) {
+        return api('/api/devices?account=' + encodeURIComponent(a.name) + '&live=' + (live ? 1 : 0)).then(function (j) {
+          return (j && j.ok) ? (j.devices || []).map(function (d) { return withAcc(d, a.name); }) : [];
+        });
+      })).then(function (arrs) { load([].concat.apply([], arrs)); });
+      return;
+    }
+    api('/api/devices?account=' + encodeURIComponent(SEL) + '&live=' + (live ? 1 : 0)).then(function (j) {
+      if (j && j.ok) load((j.devices || []).map(function (d) { return withAcc(d, SEL); }));   // 统一帶 _acc，预览状态判定才不会跨账号误清
+      else { var box = $('#' + tgt[0]); if (box) box.innerHTML = '<div class="empty">获取设备失败：' + esc((j && j.msg) || '') + '</div>'; }
+    });
+  }
+  function pushScope(name) {          // 监控任务范围跟着选中账号走
+    if (DEMO) return;
+    api('/api/watchscope', { method: 'POST',
+      body: JSON.stringify({ accounts: name === '__ALL__' ? null : [name] })
+    }).catch(function () {});
+  }
+  function selectAccount(name) {
+    SEL = name; renderAccounts();
+    // 用户自己切到别的账号时，作废上一次的通知跳转目标（跳转自己那次 acc 相同，不会被清掉）
+    if (NAV_TARGET && NAV_TARGET.acc !== name) NAV_TARGET = null;
+    pushScope(name);
+    var wt = $('#wTitle'); if (wt) wt.textContent = name === '__ALL__' ? '数据监控 · 全部账号' : name;
+    var a = ACCOUNTS.filter(function (x) { return x.name === name; })[0];
+    $('#barT').textContent = name === '__ALL__' ? '全部账号' : name;
+    $('#barSub').textContent = name === '__ALL__'
+      ? ACCOUNTS.length + ' 个账号 · 全部设备'
+      : (a ? a.account + ' · 平台 ' + a.platform + ' · 全部设备' : '');
+    var hs = $('#hSub');                               // 历史页副标题同步
+    if (hs) hs.textContent = name === '__ALL__'
+      ? '全部账号 · 选择设备与变量查看趋势'
+      : (a ? a.name + ' · 选择设备与变量查看趋势' : '');
+    ['devList', 'devListW', 'devListH'].forEach(function (id) {
+      var el = $('#' + id); if (el) el.innerHTML = '<div class="empty">加载设备列表…</div>';
+    });
+    DEVS_READY_SEL = null;              // 列表已作废，等新账号的列表渲染完才算就绪
+    refreshDevices(true);
+  }
+  function statusColor(s) {
+    if (s === '在线') return '#12A150';
+    if (s === '数据陈旧') return '#C77700';
+    return '#8A8F99';
+  }
+  function renderDevices(devs, listId, footId, live) {
+    devs = devs || [];
+    if (listId === 'devListW') devs = kwFilter(devs);   // 监控页设备列表只看白名单内
+    devs = sortDevs(devs);        // 统一排序（默认站名），顺序不再跟接口抖动
+    CUR_DEVS = devs;
+    DEVS_READY_SEL = SEL;         // 这一批列表属于当前账号（供「点通知跳转」判断就绪）
+    if (live) WDEVS = devs;
+    var box = $('#' + (listId || 'devList'));
+    if (!box) return;
+    /* 记住重画前选中的是哪台。重画会丢掉 .on 高亮，而右侧预览/实时卡/折线图还停在这台上，
+       不补回来就成了「右边显示 A，左边没有一行是高亮的」。 */
+    var prevOn = null;
+    var onRow = box.querySelector ? box.querySelector('.drow.on') : null;
+    if (onRow && onRow.dataset) prevOn = onRow.dataset.no;
+    box.innerHTML = '';
+    // 预览的设备若仍在当前列表里则保留实时卡状态（否则按钮会变死卡）；
+    // 确实不在了（如切换账号）才作废，并把右侧卡清成提示，不留点不动的「立即获取」
+    if (PV_LIVE && !devs.some(function (x) {
+      return x.no === PV_LIVE.no && (x._acc || '') === (PV_LIVE.acc || '');
+    })) {
+      PV_LIVE = null;
+      var pvw = $('#pvBodyW');
+      if (pvw) pvw.innerHTML = '<div class="phold">请在设备列表选择站点查看实时数据。</div>';
+    }
+    // 历史页同理：当前折线图的设备不在新列表里（切换账号）就作废，避免显示别的账号的曲线
+    if (listId === 'devListH' && HCUR && !devs.some(function (x) {
+      return x.no === HCUR.no && (x._acc || '') === (HCUR.acc || '');
+    })) {
+      HCUR = null; HSEL = []; HISTDATA = null;
+      var hbk = $('#histBody');
+      if (hbk) hbk.innerHTML = '<div class="phold">请在设备列表选择站点查看历史趋势。</div>';
+      var hmt = $('#histMeta'); if (hmt) hmt.textContent = '';
+    }
+    updateBarSub(CUR_DEVS);
+    if (WATCH_ST || WATCH) updateWBar(WATCH_ST || WATCH);   // 监控状态跟着当前账号走
+    var foot = $('#' + (footId || 'devFoot'));
+    if (!devs.length) { box.innerHTML = '<div class="empty">该账号下没有设备</div>'; if (foot) foot.textContent = '共 0 台'; return; }
+    devs.forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'drow';
+      row.dataset.no = d.no;          // 供「点击系统通知跳转到对应站点」按编号定位
+      var st = d.status || '未巡';   // 后端报告里有真实状态；没有则标「未巡」，不再误标「离线」
+      var flag = (live && d.anoms && d.anoms.length)
+        ? '<i class="wflag" title="' + esc(d.anoms.map(function (x) { return x.name; }).join('、')) + '"></i>'
+        : '';
+      row.innerHTML = '<div class="dname">' + flag + esc(d.name || d.no || '') + '</div>'
+        + '<div class="st"><i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st) + '</div>'
+        + '<div class="age">' + esc(d.age || '无数据') + '</div>';
+      row.onclick = function () {
+        $$('.drow').forEach(function (r) { r.classList.remove('on'); });
+        row.classList.add('on');
+        if (listId === 'devListH') histPick(d);          // 历史页：画折线图
+        else if (live) {
+          renderLiveCard(d);                             // 监控页：实时数据卡
+          if (W_TAB !== 'live') wTab('live');            // 在异常/规则页签下点站点 → 跳回实时数据
+        }
+        else showPreview(d);                             // 巡站页：截图预览
+      };
+      box.appendChild(row);
+    });
+    applyDevQ(listId);                    // 新渲染的列表套用当前搜索关键字
+    // 右侧没内容就自动选中一条，保证默认有内容（监控=实时卡/历史=折线图/巡站=截图）；
+    // 手动选过的状态（PV_LIVE/HCUR/PV_PATH）还在时不打断，状态被清（切账号/删批次）才重新选
+    if (devs.length) {
+      var needPick = AUTO_PICK[listId] !== SEL;
+      if (listId === 'devListW' && !PV_LIVE) needPick = true;
+      else if (listId === 'devListH' && !HCUR) needPick = true;
+      else if (listId === 'devList' && !PV_PATH && !AUTO_SHOT) needPick = true;
+      if (needPick) {
+        AUTO_PICK[listId] = SEL;
+        if (listId === 'devListW') {
+          // 「点系统通知跳转到站点」优先：目标账号的设备列表刚到就先选它，
+          // 否则会被这里「自动选中排序后的第一台」抢走 —— 那正是跳转落到别站的根因。
+          var nav = null;
+          if (NAV_TARGET && NAV_TARGET.acc === SEL) {
+            nav = devs.filter(function (x) {
+              return (NAV_TARGET.no && x.no === NAV_TARGET.no)
+                || (!NAV_TARGET.no && NAV_TARGET.name && x.name === NAV_TARGET.name);
+            })[0] || null;
+            if (nav) NAV_TARGET = null;      // 用掉了才清；没找到就留着，等下一轮列表
+          }
+          var first = nav || devs[0];
+          var fi = devs.indexOf(first);
+          if (fi >= 0 && box.children[fi]) box.children[fi].classList.add('on');
+          renderLiveCard(first);
+        } else if (listId === 'devListH') {
+          if (box.children[0]) box.children[0].classList.add('on');
+          histPick(devs[0]);
+        } else {
+          for (var pi = 0; pi < devs.length; pi++) {     // 巡站页挑第一台有截图的
+            if (devs[pi].shot) {
+              if (box.children[pi]) box.children[pi].classList.add('on');
+              showPreview(devs[pi]);
+              break;
+            }
+          }
+        }
+      }
+    }
+    /* 补回上一轮的高亮（自动选中优先；已经选中了就不动） */
+    if (prevOn && !box.querySelector('.drow.on')) {
+      Array.prototype.forEach.call(box.children, function (c) {
+        if (c.dataset && c.dataset.no === prevOn) c.classList.add('on');
+      });
+    }
+    var on = devs.filter(function (d) { return d.status === '在线'; }).length;
+    if (AUTO_SHOT && listId === 'devList' && devs.length) {
+      AUTO_SHOT = false;
+      for (var ai = 0; ai < devs.length; ai++) {
+        if (devs[ai].shot) {
+          $$('.drow').forEach(function (r) { r.classList.remove('on'); });
+          if (box.children[ai]) box.children[ai].classList.add('on');
+          showPreview(devs[ai]);
+          break;
+        }
+      }
+    }
+    var st = devs.filter(function (d) { return d.status === '数据陈旧'; }).length;
+    var unk = devs.filter(function (d) { return !d.status; }).length;
+    var off = devs.length - on - st - unk;
+    if (foot) foot.textContent = '共 ' + devs.length + ' 台 · 在线 ' + on + ' / 陈旧 ' + st + ' / 离线 ' + off
+      + (unk ? ' / 未巡 ' + unk : '');
+  }
+  function updateBarSub(devs) {
+    if (SEL === '__ALL__') {
+      var n = 0;
+      ACCOUNTS.forEach(function (a) { if (SITE_SEL[a.name]) n += SITE_SEL[a.name].length; });
+      $('#barSub').textContent = ACCOUNTS.length + ' 个账号 · '
+        + (n ? ('已选 ' + n + ' / ' + devs.length + ' 台') : '全部设备');
+      return;
+    }
+    var a = ACCOUNTS.filter(function (x) { return x.name === SEL; })[0];
+    if (!a) return;
+    var s = SITE_SEL[SEL];
+    $('#barSub').textContent = a.account + ' · 平台 ' + a.platform + ' · '
+      + (s ? ('已选 ' + s.length + ' / ' + devs.length + ' 台') : '全部设备');
+  }
+  function showPreview(d) {
+    PV_LIVE = null;
+    var body = $('#pvBody');
+    if (d.rows && d.rows.length) { renderPreviewCard(d); return; }
+    if (d.shot) {
+      PV_PATH = d.shot;
+      var stTxt = d.status || '未巡';
+      var cls = stTxt === '在线' ? '' : (stTxt === '数据陈旧' ? ' st' : ' of');
+      body.innerHTML = '<div class="ph"><div class="phtop"><span class="badge ' + cls + '">' + esc(stTxt) + '</span>'
+        + '<span style="font-size:11px;color:#B0B5BD">' + esc(d.shot_time || d.age || '') + '</span></div>'
+        + '<div class="phname">' + esc(d.name || d.no || '') + '</div>'
+        + '<div class="phmeta">' + esc(d.age || '最新一张截图') + '</div>'
+        + '<img class="shot" src="/shot?p=' + encodeURIComponent(d.shot) + '"></div>';
+    } else {
+      PV_PATH = null;
+      body.innerHTML = '<div class="phold">「' + esc(d.name || d.no || '') + '」暂无截图。<br>勾选账号后点「开始截图」生成。</div>';
+    }
+  }
+  function accountOf(d) { return d._acc || SEL || ''; }
+  // 重建实时数据面板时保留滚动位置：后台每 8 秒轮询刷新一次，若把整块 innerHTML 换掉，
+  // 浏览器会把滚动条顶回顶部 —— 用户滚到下面看数据时会觉得"总是自动复位"。
+  // 这里在替换前后记录/恢复 scrollTop；换设备（内容整体变）时由调用方显式归零。
+  function setPvBodyHtml(html) {
+    var b = $('#pvBodyW');
+    if (!b) return;
+    var st = b.scrollTop;
+    b.innerHTML = html;
+    if (st) b.scrollTop = st;
+  }
+  function renderLiveCard(d) {
+    var body = $('#pvBodyW');
+    if (!body) return;
+    PV_PATH = null;
+    var acc = accountOf(d);
+    var prev = PV_LIVE;
+    var same = !!(prev && prev.acc === acc && prev.no === d.no);   // 同一台设备的自动刷新
+    PV_LIVE = { acc: acc, no: d.no, name: d.name || d.no || '' };
+    if (!same) {
+      // 只在换设备时显示占位并滚到顶部；同设备刷新保留旧内容，避免闪一下又把滚动顶回去
+      body.scrollTop = 0;
+      setPvBodyHtml('<div class="ph"><div class="phtop"><span class="badge">实时数据</span></div>'
+        + '<div class="phname">' + esc(d.name || d.no || '') + '</div>'
+        + '<div class="phmeta">正在获取实时数据…</div></div>');
+    }
+    api('/api/watchdev?account=' + encodeURIComponent(acc) + '&no=' + encodeURIComponent(d.no))
+      .then(function (j) {
+        if (!PV_LIVE || PV_LIVE.no !== d.no || PV_LIVE.acc !== acc) return;   // 用户已切到别的设备
+        if (!j || !j.ok) {
+          setPvBodyHtml(liveEmpty(d.name || d.no || '',
+            (j && j.msg) || '该设备还没有实时数据。'));
+          return;
+        }
+        paintLive(j);
+      })
+      .catch(function () {
+        if (PV_LIVE && PV_LIVE.no === d.no) {
+          setPvBodyHtml(liveEmpty(d.name || d.no || '', '实时数据获取失败。'));
+        }
+      });
+  }
+  function fmtAgeMin(m) {
+    if (m == null) return '无数据';
+    if (m < 1) return '刚刚';
+    if (m < 60) return Math.round(m) + ' 分钟前';
+    if (m < 1440) return (Math.round(m / 6) / 10) + ' 小时前';
+    return (Math.round(m / 144) / 10) + ' 天前';
+  }
+  function liveEmpty(name, msg) {
+    return '<div class="phold">「' + esc(name) + '」暂无实时数据。<br>' + esc(msg)
+      + '<br><br><button class="btn pri" onclick="fetchOne()">立即获取</button></div>';
+  }
+  function paintLive(j) {
+    var body = $('#pvBodyW');
+    if (!body || !PV_LIVE) return;
+    var cls = j.status === '在线' ? '' : (j.status === '数据陈旧' ? ' st' : ' of');
+    var an = (j.anoms || []).map(function (x) { return x.name || x.rule_name || ''; })
+      .filter(Boolean).join('、');
+    // 记住用户已输入但没提交的值，重建后回填（否则每 8 秒自动刷新会把输入冲掉）
+    var typed = {};
+    $$('#pvBodyW .wnum').forEach(function (el) { if (el.value !== '') typed[el.dataset.i] = el.value; });
+    LIVE_VALS = j.vals || [];
+    var rows = (j.vals || []).map(function (r, i) {
+      var v = (r.v == null || r.v === '') ? '—' : String(r.v);
+      if (r.rw === 1) {       // 控制点：0/1 给一键开关，其余给输入框 + 写入
+        var ctl;
+        if (v === '0' || v === '1') {
+          ctl = '<button class="wbtn" data-i="' + i + '">改为 ' + (v === '1' ? '0' : '1') + '</button>'
+              + '<span class="rv" style="min-width:14px;text-align:right">' + esc(v) + '</span>';
+        } else {
+          // 输入框只放纯数值，单位单独显示（避免把 "22 ℃" 这种带单位的值发出去）
+          var mm = /^([-+]?\d+(?:\.\d+)?)\s*(.*)$/.exec(v);
+          // 无数据时设备回的是 "-"（半角）或 "—"：一律当成空，别把它当下发值发出去
+          var numv = mm ? mm[1] : (/^[-—]+$/.test(v) ? '' : v);
+          var unitt = mm ? mm[2] : '';
+          ctl = '<input class="wnum" data-i="' + i + '" value="' + esc(numv) + '">'
+              + (unitt ? '<span class="wunit">' + esc(unitt) + '</span>' : '')
+              + '<button class="wbtn" data-i="' + i + '">写入</button>';
+        }
+        return '<div class="r rw1"><span class="rk">' + esc(r.name) + '</span>'
+             + '<span class="rctl">' + ctl + '</span></div>';
+      }
+      return '<div class="r"><span class="rk">' + esc(r.name) + '</span><span class="rv">'
+        + esc(v) + '</span></div>';
+    }).join('');
+    setPvBodyHtml('<div class="ph"><div class="phtop">'
+      + '<span class="badge ' + cls + '">' + esc(j.status) + '</span>'
+      + '<span style="font-size:11px;color:#B0B5BD">数据 ' + esc(j.age || '—') + '</span>'
+      + '<button class="btn" style="margin-left:auto;height:24px;padding:0 10px;font-size:11px"'
+      + (j.manual ? ' disabled' : '') + ' onclick="fetchOne()">'
+      + (j.manual ? '已获取' : '立即获取') + '</button></div>'
+      + '<div class="phname">' + esc(PV_LIVE.name) + '</div>'
+      + '<div class="phmeta">实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量'
+      + (an ? ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>' : '') + '</div>'
+      + '<div class="rows">' + (rows || '<div class="r"><span class="rk">—</span><span class="rv">无变量</span></div>') + '</div></div>');
+    // 回填用户正在输入的值 + 绑定写入按钮
+    $$('#pvBodyW .wnum').forEach(function (el) {
+      var t = typed[el.dataset.i];
+      if (t != null && t !== '') el.value = t;
+    });
+    $$('#pvBodyW .wbtn').forEach(function (b) {
+      b.onclick = function () { doWrite(parseInt(b.dataset.i, 10)); };
+    });
+  }
+  // 写入 / 开关：先弹「设备 · 变量 · 当前值 → 新值」确认框（用户要求的保存前额外提醒），确认后才下发
+  var WRITING = false;        // 防连点：一次只发一条
+  var CTRL_PEND = null;       // 待确认的下发动作
+  // 二次确认弹窗（页面内弹窗，不用原生 confirm —— 本程序关硬件加速 + in-process-gpu，
+  //  原生对话框在这套配置下出过闪退，改用页面内弹窗更稳，也更醒目）
+  function showCtrlModal(html, onOk) {
+    CTRL_PEND = onOk;
+    var b = $('#ctrlBody'); if (b) b.innerHTML = html;
+    var m = $('#ctrlModal'); if (m) m.classList.add('show');
+  }
+  function ctrlCancel() {
+    CTRL_PEND = null;
+    var m = $('#ctrlModal'); if (m) m.classList.remove('show');
+  }
+  function ctrlOk() {
+    var f = CTRL_PEND; CTRL_PEND = null;
+    var m = $('#ctrlModal'); if (m) m.classList.remove('show');
+    if (typeof f === 'function') {
+      try { f(); } catch (e) { alert('操作异常：' + ((e && e.message) || e)); }
+    }
+  }
+  window.ctrlCancel = ctrlCancel;
+  window.ctrlOk = ctrlOk;
+  function doWrite(i) {
+    try {
+      if (WRITING) return;
+      var r = LIVE_VALS[i];
+      if (!r || r.rw !== 1 || !PV_LIVE) return;
+      var cur = (r.v == null || r.v === '') ? '' : String(r.v);
+      var target;
+      if (cur === '0' || cur === '1') {
+        target = cur === '1' ? '0' : '1';          // 开关：一键切反
+      } else {
+        var inp = document.querySelector('#pvBodyW .wnum[data-i="' + i + '"]');
+        target = inp ? String(inp.value).trim() : '';
+        if (target === '') { alert('请先填写要写入的数值'); return; }
+      }
+      var info = '<div>设备：<b>' + esc(PV_LIVE.name || PV_LIVE.no) + '</b></div>'
+        + '<div>变量：<b>' + esc(r.name) + '</b></div>'
+        + '<div>当前值：' + esc(cur || '—') + ' &nbsp;→&nbsp; <b style="color:#1F4BB8">'
+        + esc(target) + '</b></div>';
+      showCtrlModal(info, function () { sendControl(r, target); });   // ★ 二次确认后才下发
+    } catch (e) {
+      alert('操作异常：' + ((e && e.message) || e));
+    }
+  }
+  function sendControl(r, target) {
+    if (WRITING || !PV_LIVE) return;
+    WRITING = true;
+    var acc = PV_LIVE.acc, no = PV_LIVE.no;
+    toast('正在下发 ' + r.name + ' → ' + target + ' …');
+    api('/api/control', { method: 'POST', body: JSON.stringify({
+      account: acc, no: no, confirm: true,
+      points: [{ dataPointId: r.id, identifier: r.ident, value: target }]
+    }) }).then(function (j) {
+      WRITING = false;
+      if (j && j.ok) {
+        if (j.confirmed) {
+          // 设备已回报新值 → 界面立即更新，再向云端拉一次对齐
+          for (var k = 0; k < LIVE_VALS.length; k++) {
+            if (LIVE_VALS[k] && LIVE_VALS[k].name === r.name) LIVE_VALS[k].v = target;
+          }
+          toast('已生效：' + r.name + ' = ' + target);
+        } else {
+          toast((j.msg || '已下发').slice(0, 90));
+        }
+        setTimeout(function () { if (PV_LIVE && PV_LIVE.no === no) { try { fetchOne(); } catch (e) {} } }, 1500);
+        setTimeout(function () { if (PV_LIVE && PV_LIVE.no === no) { try { fetchOne(); } catch (e) {} } }, 6000);
+      } else {
+        alert('下发失败：' + ((j && j.msg) || '未知错误'));
+      }
+    }).catch(function (e) {
+      WRITING = false;
+      alert('下发失败：' + ((e && e.message) || '后端未响应'));
+    });
+  }
+  function fetchOne() {           // 手动向平台拉这台设备的最新数据
+    if (!PV_LIVE) return;
+    var acc = PV_LIVE.acc, no = PV_LIVE.no, name = PV_LIVE.name;
+    var body = $('#pvBodyW');
+    if (!body) return;
+    setPvBodyHtml('<div class="ph"><div class="phname">' + esc(name) + '</div>'
+      + '<div class="phmeta">正在向平台获取最新数据，请稍候…</div></div>');
+    api('/api/watchfetch', { method: 'POST', body: JSON.stringify({ account: acc, no: no }) })
+      .then(function (j) {
+        if (!PV_LIVE || PV_LIVE.no !== no || PV_LIVE.acc !== acc) return;
+        if (!j || !j.ok) {
+          setPvBodyHtml(liveEmpty(name, (j && j.msg) || '获取失败。'));
+          return;
+        }
+        var d = j.dev || {};
+        var vals = Object.keys(d.vals || {}).map(function (k) {
+          var x = d.vals[k] || {};
+          return { name: k, v: x.v, rw: x.rw || 0, id: x.id, ident: x.ident || '' };
+        });
+        paintLive({ status: d.status, age: fmtAgeMin(d.age_min), vals: vals,
+                    n_points: d.n_points, anoms: d.anoms || [], manual: true });
+        refreshDevices();       // 列表状态同步更新
+      })
+      .catch(function () {
+        if (PV_LIVE && PV_LIVE.no === no) setPvBodyHtml(liveEmpty(name, '获取失败，请重试。'));
+      });
+  }
+  function refreshLive() {
+    renderLiveCard({ no: PV_LIVE.no, name: PV_LIVE.name, _acc: PV_LIVE.acc });
+  }
+  function renderPreviewCard(d) {
+    PV_PATH = null;
+    var cls = d.status === '在线' ? '' : (d.status === '数据陈旧' ? ' st' : ' of');
+    var rows = (d.rows || []).map(function (r) {
+      return '<div class="r"><span class="rk">' + esc(r[0]) + '</span><span class="rv">' + esc(r[1]) + '</span></div>';
+    }).join('');
+    $('#pvBody').innerHTML = '<div class="ph"><div class="phtop">'
+      + '<span class="badge ' + cls + '">' + esc(d.status) + '</span>'
+      + '<span style="font-size:11px;color:#B0B5BD">' + esc(d.date || '2026-09-29 20:06') + '</span></div>'
+      + '<div class="phname">' + esc(d.name) + '</div>'
+      + '<div class="phmeta">' + esc(d.meta || (d.age + ' · 前 10 个核心变量')) + '</div>'
+      + '<div class="rows">' + rows + '</div></div>';
+  }
+  function autoPreview(name) {
+    var first = (DEMO_DEVS[name] || [])[0];
+    if (first) { var rows = $$('#devList .drow'); if (rows[0]) { rows[0].classList.add('on'); showPreview(first); } }
+  }
+  function openShot() { if (PV_PATH) api('/api/open?p=' + encodeURIComponent(PV_PATH)); }
+
+  // ---------- 键盘 ↑/↓ 切换设备（巡站=截图预览，监控=实时卡，历史=折线图）----------
+  function devNavTarget() {
+    var v = document.body.dataset.view;
+    if (v === 'watch') return { list: '#devListW', act: renderLiveCard };
+    if (v === 'history') return { list: '#devListH', act: histPick };
+    if (v === 'patrol') return { list: '#devList', act: showPreview };
+    return null;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if ($('#siteModal').classList.contains('show')) return;           // 站点弹窗打开时不抢按键
+    var t = devNavTarget();
+    if (!t) return;
+    var tag = (document.activeElement && document.activeElement.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    var rows = $$(t.list + ' .drow');
+    if (!rows.length) return;
+    e.preventDefault();
+    var idx = -1;
+    rows.forEach(function (r, i) { if (r.classList.contains('on')) idx = i; });
+    idx = e.key === 'ArrowDown' ? idx + 1 : (idx < 0 ? 0 : idx - 1);
+    if (idx < 0) idx = 0;
+    if (idx > rows.length - 1) idx = rows.length - 1;
+    var d = CUR_DEVS[idx];
+    if (!d) return;
+    rows.forEach(function (r) { r.classList.remove('on'); });
+    rows[idx].classList.add('on');
+    t.act(d);
+    rows[idx].scrollIntoView({ block: 'nearest' });
+  });
+  function openShotDir() {
+    if (!PV_PATH) return;
+    api('/api/openfolder?p=' + encodeURIComponent(PV_PATH.replace(/\/[^/]*$/, '')));
+  }
+
+  // ---------- 运行 / 暂停 / 状态轮询 ----------
+  function startRun() {
+    if (DEMO) { toast('演示模式：请通过 Electron 启动以执行巡站'); alert('当前为界面预览（未连接后端）。请用 Electron 启动后执行巡站。'); return; }
+    if (!SEL) { alert('请先在左侧选择一个账号'); return; }
+    $('#btnRun').disabled = true;
+    var names, dn = {};
+    if (SEL === '__ALL__') {
+      names = ACCOUNTS.map(function (a) { return a.name; });
+      ACCOUNTS.forEach(function (a) { if (SITE_SEL[a.name]) dn[a.name] = SITE_SEL[a.name]; });
+    } else {
+      names = [SEL];
+      if (SITE_SEL[SEL]) dn[SEL] = SITE_SEL[SEL];
+    }
+    api('/api/run', { method: 'POST', body: JSON.stringify({
+      names: names,
+      workers: parseInt($('#setWorkers').value, 10) || 4,
+      device_nos: dn
+    }) }).then(function () { startPoll(); });
+  }
+  function pauseRun() {
+    if (DEMO) return;
+    api('/api/pause', { method: 'POST' }).then(function () { $('#btnPause').textContent = '已暂停'; });
+  }
+  function startPoll() { if (POLL) clearInterval(POLL); POLL = setInterval(poll, 900); poll(); }
+  function fmtLine(ln) {
+    var h = esc(ln);
+    h = h.replace(/^(\d{2}:\d{2}:\d{2})/, '<span class="d2">$1</span>');
+    h = h.replace(/离线\(数据陈旧\)/g, '<span class="a">离线(数据陈旧)</span>');
+    h = h.replace(/离线\(无数据\)/g, '<span class="d2">离线(无数据)</span>');
+    h = h.replace(/数据陈旧/g, '<span class="a">数据陈旧</span>');
+    h = h.replace(/在线/g, '<span class="g">在线</span>');
+    return h;
+  }
+  function appendLogs(lines) {
+    var box = $('#logBody');
+    lines.forEach(function (ln) {
+      var d = document.createElement('div'); d.innerHTML = fmtLine(ln); box.appendChild(d);
+    });
+    box.scrollTop = box.scrollHeight;
+  }
+  var LOG_BUSY = false;
+  var LAST_BATCH = '';             // 最近一次见到的批次目录名；变化即代表有新截图
+  function pollLogs(cb) {          // 拉增量日志；进度处理放 cb，避免两处重复请求
+    if (LOG_BUSY) return;
+    LOG_BUSY = true;
+    api('/api/status?since=' + LOG_SINCE).then(function (j) {
+      LOG_BUSY = false;
+      if (j.logs && j.logs.length) { appendLogs(j.logs); LOG_SINCE += j.logs.length; }
+      // 批次变化兜底：不管完成事件是否正常送达，只要磁盘上出现新批次就强制刷新列表
+      // （巡站运行中会先建批次目录，必须排除 running，否则会把列表刷成空的）
+      var b = (j.batch && !j.running) ? j.batch : '';
+      if (b && b !== LAST_BATCH) {
+        var first = !LAST_BATCH;
+        LAST_BATCH = b;
+        if (!first && SEL) {
+          AUTO_SHOT = true;
+          selectAccount(SEL);      // 重新拉三页设备列表（强制，不走 60s 缓存），预览切到新截图
+        }
+      }
+      if (cb) cb(j);
+    }).catch(function () { LOG_BUSY = false; });
+  }
+  function poll() {
+    pollLogs(function (j) {
+      var p = j.progress || { done: 0, total: 0 };
+      if (j.running) {
+        $('#stLeft').textContent = '截图中 ' + p.done + '/' + p.total + (j.stage ? ' · ' + j.stage : '');
+        $('#btnPause').disabled = false; $('#btnRun').disabled = true;
+      } else if (j.done) {
+        $('#stLeft').textContent = '完成 ' + j.done[0] + ' 张 · 在线 ' + j.done[1];
+        $('#btnPause').disabled = true; $('#btnRun').disabled = false; $('#btnPause').textContent = '暂停';
+        if (POLL) { clearInterval(POLL); POLL = null; }
+        AUTO_SHOT = true;              // 完成后自动展示第一张有截图的设备
+        loadAccounts();
+        if (SEL) selectAccount(SEL);   // 巡站完成后刷新设备列表，带上新截图
+      } else {
+        $('#stLeft').textContent = j.error
+          ? '出错：' + String(j.error).slice(0, 80)
+          : '就绪 · 勾选账号后点「开始截图」';
+        $('#btnPause').disabled = true; $('#btnRun').disabled = false; $('#btnPause').textContent = '暂停';
+      }
+      if (j.zip) $('#stRight').textContent = '压缩包: ' + j.zip;
+    });
+  }
+
+  // ---------- 监控页 ----------
+  var WATCH = null, WATCH_ST = null, WFILTER = 'all', WLIST = [], RULES = null, RU_DIRTY = false;
+
+  function fmtDur(min) {
+    if (min == null) return '';
+    if (min < 60) return '已持续 ' + Math.round(min) + ' 分钟';
+    if (min < 1440) return '已持续 ' + (min / 60).toFixed(1) + ' 小时';
+    return '已持续 ' + (min / 1440).toFixed(1) + ' 天';
+  }
+  function wStat(k, v, cls) {
+    return '<div class="wstat"><div class="k">' + esc(k) + '</div><div class="v '
+      + (cls || '') + '">' + esc(v) + '</div></div>';
+  }
+  function wIvOpt(v, lab) {
+    return '<option value="' + v + '"' + (WATCH && WATCH.interval === v ? ' selected' : '')
+      + '>' + lab + '</option>';
+  }
+
+  function paintWatch(j) {
+    if (!j || j.ok === false) {
+      $('#wStats').innerHTML = '<div style="color:#8A9099;font-size:12.5px">'
+        + esc((j && j.msg) || '监控引擎未启用') + '</div>';
+      $('#anomList').innerHTML = '<div class="empty">监控引擎未启用</div>';
+      return;
+    }
+    WATCH = j;
+    var anoms = j.anomalies || [];
+    var nAll = anoms.length;
+    var nCrit = anoms.filter(function (a) { return a.level === 'critical'; }).length;
+    var stateTxt = !j.enabled ? '已暂停' : (j.running ? '巡检中…' : '监控中');
+    var nx = j.next_in == null ? '—'
+      : (j.next_in >= 60 ? Math.round(j.next_in / 60) + ' 分后' : j.next_in + ' 秒后');
+
+    var parts = [];
+    parts.push('状态 <b>' + esc(stateTxt) + '</b>');
+    parts.push('上次 <b>' + esc(j.last_run_text || '—') + '</b>');
+    parts.push('下次 <b>' + esc(nx) + '</b>');
+    parts.push('耗时 <b>' + (j.last_duration != null ? Math.round(j.last_duration) + 's' : '—') + '</b>');
+    parts.push('请求 <b>' + (j.requests_last_round || 0) + '</b>');
+    parts.push('异常 <b class="' + (nAll ? 'bad' : '') + '">' + nAll + ' 台' + (nCrit ? '（严重 ' + nCrit + '）' : '') + '</b>');
+    if (j.paused_reason) parts.push('<span class="bad">' + esc(j.paused_reason) + '</span>');
+    if (j.last_error) parts.push('<span class="bad">' + esc(String(j.last_error).slice(0, 60)) + '</span>');
+    $('#wStats').innerHTML = parts.join(' <span style="color:#E5E7EB">|</span> ');
+
+    var list = anoms.slice();
+    if (WFILTER === 'new') list = list.filter(function (a) { return a.is_new; });
+    if (WFILTER === 'crit') list = list.filter(function (a) { return a.level === 'critical'; });
+    WLIST = list;
+    var box = $('#anomList');
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">' + (nAll ? '当前筛选下没有异常'
+        : (j.baseline_done ? '暂无异常' : '等待首轮巡检…')) + '</div>';
+    } else {
+      box.innerHTML = list.map(function (a, i) {
+        return '<div class="anom ' + (a.level === 'critical' ? 'crit' : 'warn')
+          + '" onclick="locateIdx(' + i + ')">' + '<div class="ai"><div class="an">'
+          + esc(a.dev_name) + (a.is_new ? '<span class="anew">新</span>' : '') + '</div>'
+          + '<div class="as">' + esc(a.rule_name)
+          + (a.point ? ' · ' + esc(a.point) + ' = ' + esc(a.val) : '') + '</div>'
+          + '<div class="ad">' + esc(a.acc) + ' · ' + esc(a.cond || '') + ' · '
+          + esc(fmtDur(a.duration_min)) + '</div></div></div>';
+      }).join('');
+    }
+    if (!RU_DIRTY && j.rules) RULES = JSON.parse(JSON.stringify(j.rules));
+  }
+
+  function paintRules(rules) {
+    if (rules) RULES = JSON.parse(JSON.stringify(rules));
+    if (!RULES) return;
+    paintRepeatChips();
+    paintBuiltinChips();
+    var rs = RULES.rules || [];
+    var stale = $('#alStale');
+    if (stale) stale.innerHTML = '<span class="hint" style="margin:0">数据停更阈值</span>'
+      + '<input type="number" min="1" max="1440" value="' + (RULES.stale_minutes || 30) + '"'
+      + ' onchange="__ruleStale(this.value)"'
+      + ' style="width:72px;height:28px;border:1px solid #E1E4E9;border-radius:6px;padding:0 6px;font-size:12px">'
+      + '<span class="hint" style="margin:0">分钟 —— 超过这么久没有新数据即判为离线</span>';
+    var box = $('#alRuleBox');
+    if (!box) return;
+    if (!rs.length) {
+      box.innerHTML = '<div class="ahint" style="margin:0">暂无自定义规则（当前只有内置的数据停更规则在生效）。'
+        + '需要按水温、压力等具体数值报警时，点下方「添加规则」。'
+        + '变量名支持 * 通配，也可只填几个字（如 <b>供水温度</b>、<b>进水温度</b> 都能识别），'
+        + '输入框下方会实时显示能否匹配上；本轮读到的数据一旦越过阈值就立刻提醒，无需等待。担心数值抖动可用「区间内」留出余量。</div>';
+      return;
+    }
+    // 'between' = 区间内（大于左值且小于右值），阈值列会展开成两个输入框
+    var ops = ['<', '>', '<=', '>=', '=', '!=', 'between'];
+    var opText = { 'between': '区间内' };
+    var accts = (WC && WC.accounts) || [];
+    // 下拉选项构造：首项为「全部」(*)，当前值不在清单里时也保留，避免丢数据
+    function optHtml(val, list, allLabel) {
+      var out = ['<option value="*"' + (val === '*' ? ' selected' : '') + '>' + allLabel + '</option>'];
+      var seen = {};
+      (list || []).forEach(function (n) {
+        if (seen[n]) return;
+        seen[n] = 1;
+        out.push('<option value="' + esc(n) + '"' + (val === n ? ' selected' : '') + '>' + esc(n) + '</option>');
+      });
+      if (val && val !== '*' && !seen[val])
+        out.push('<option value="' + esc(val) + '" selected>' + esc(val) + '</option>');
+      return out.join('');
+    }
+    var body = rs.map(function (r, i) {
+      // 设备名下拉随本行账号过滤；账号为 * 时展示全部设备
+      var accPat = r.account || '*';
+      var devList = [];
+      if (WC) {
+        WC.devices.forEach(function (d) {
+          if (accPat === '*' || d.acc === accPat) devList.push(d.name);
+        });
+      }
+      return '<tr class="' + (r.enabled === false ? 'off' : '') + '">'
+        + '<td class="cen"><input type="checkbox" ' + (r.enabled !== false ? 'checked' : '')
+        + ' onchange="__ruleField(' + i + ',\'enabled\',this.checked);'
+        + 'this.closest(\'tr\').className=this.checked?\'\':\'off\'"></td>'
+        + '<td><input type="text" value="' + esc(r.name || '') + '" oninput="__ruleField(' + i + ',\'name\',this.value)"></td>'
+        + '<td><select onchange="__ruleField(' + i + ',\'account\',this.value);__ruleRepaint()">'
+        + optHtml(accPat, accts, '全部账号 (*)') + '</select></td>'
+        + '<td><select onchange="__ruleField(' + i + ',\'device\',this.value)">'
+        + optHtml(r.device || '*', devList, '全部设备 (*)') + '</select></td>'
+        + '<td><input type="text" list="alPts" value="' + esc(r.point || '*') + '" title="可从下拉选择，也可只填几个字，如 供水温度、进水温度 都能识别" oninput="__ruleField(' + i + ',\'point\',this.value);__rulePointHint(' + i + ')"></td>'
+        + '<td><select onchange="__ruleField(' + i + ',\'op\',this.value);__ruleRepaint()">'
+        + ops.map(function (o) {
+            return '<option value="' + o + '"' + (o === (r.op || '<') ? ' selected' : '') + '>'
+              + (opText[o] || o.replace('<', '&lt;').replace('>', '&gt;')) + '</option>';
+          }).join('') + '</select></td>'
+        + (r.op === 'between'
+            ? '<td><div class="v2">'
+              + '<input type="text" value="' + esc(r.value == null ? '' : r.value) + '" oninput="__ruleField(' + i + ',\'value\',this.value)">'
+              + '<span>~</span>'
+              + '<input type="text" value="' + esc(r.value2 == null ? '' : r.value2) + '" oninput="__ruleField(' + i + ',\'value2\',this.value)">'
+              + '</div></td>'
+            : '<td><input type="text" value="' + esc(r.value == null ? '' : r.value) + '" oninput="__ruleField(' + i + ',\'value\',this.value)"></td>')
+        + '<td><select onchange="__ruleField(' + i + ',\'level\',this.value)">'
+        + '<option value="warn"' + ((r.level || 'warn') === 'warn' ? ' selected' : '') + '>提醒</option>'
+        + '<option value="critical"' + (r.level === 'critical' ? ' selected' : '') + '>严重</option></select></td>'
+        + '<td class="cen"><button class="x" onclick="ruleDel(' + i + ')" title="删除该规则">✕</button></td>'
+        + '</tr>';
+    }).join('');
+    box.innerHTML = '<table class="rtab"><colgroup>'
+      + '<col style="width:5%"><col style="width:12%"><col style="width:10%">'
+      + '<col style="width:13%"><col style="width:19%"><col style="width:8%">'
+      + '<col style="width:15%"><col style="width:9%">'
+      + '<col style="width:4%"></colgroup>'
+      + '<thead><tr><th class="cen">启用</th><th>规则名</th><th>账号</th><th>设备名</th>'
+      + '<th>变量名</th><th>条件</th><th>阈值</th><th>级别</th><th></th>'
+      + '</tr></thead><tbody>' + body + '</tbody></table>';
+    // ⚠ 必须在 innerHTML 赋值**之后**再刷提示条：
+    // __rulePointHint 是按行号去 DOM 里找 tr 的，innerHTML 还没写时DOM 是空的，
+    // 插进去的行找不到，提示条会全部丢失（页面看不出任何异常，只是提示不显示）。
+    rs.forEach(function (r, i) { __rulePointHint(i); });
+    paintRuleDiag();
+  }
+
+  // ---- 变量名即时识别提示 ----------------------------------------
+  // 与后端 watch_engine._wmatch 保持同一套逻辑，只两条，都按字面来：
+  //   1. 精确 / 通配
+  //   2. 双向包含（长度 >= 2）：写「供水温度」命中「供水温度T1」，
+  //      写「回水温度」不命中「供水温度T1」
+  // **不做同义词猜测** —— 写了什么就按什么找，猜错比找不到危险。
+  // 两边必须一致，否则这里显示「能匹配」但后端不认，用户会更困惑。
+  // 有后端交叉一致性测试（verify/test_point_match.py）兜着。
+  function __ruleEsc(s) {
+    return String(s).replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  }
+  function __ruleMatchOne(pat, s) {
+    if (!pat || pat === '*') return true;
+    pat = String(pat); s = String(s || '');
+    var rx = __ruleEsc(pat).replace(/\*/g, '.*');
+    if (new RegExp('^' + rx + '$').test(s)) return true;
+    var core = pat.replace(/\*/g, '').replace(/^\s+|\s+$/g, '');
+    if (!core) return true;
+    if (core.length < 2) return false;// 单字不宽松，避免错配
+    return core.indexOf(s) >= 0 || s.indexOf(core) >= 0;
+  }
+  window.__rulePointHint = function (i) {
+    var rs = (RULES && RULES.rules) || [];
+    var row = document.querySelector('#alRuleBox tbody tr:nth-child(' + (i + 1) + ')');
+    if (!rs[i] || !row) return;
+    // ⚠ 不要硬编码列号。规则表列顺序是
+    //   0启用 1规则名 2账号 3设备名 4变量名 5条件 6阈值 7级别 8操作
+    // 写死children[5] 会把提示插到「条件」列去——页面上仍然渲染得出来，
+    // 只是位置错了，肉眼很难发现。按表头文字定位，插错列/加列都会立刻暴露。
+    var cell = null, tds = row.children;
+    for (var k = 0; k < tds.length; k++) {
+      var inp = tds[k].querySelector('input[list="alPts"]');
+      if (inp) { cell = tds[k]; break; }
+    }
+    if (!cell) return;
+    var old = cell.querySelector('.pthint');
+    if (old) old.remove();
+    var all = (WC && WC.points) || [];
+    var pat = String(rs[i].point || '*');
+    if (pat === '*' || !all.length) return;
+    var hits = all.filter(function (p) { return __ruleMatchOne(pat, p); });
+    var d = document.createElement('div');
+    d.className = 'pthint';
+    if (hits.length) {
+      d.classList.add('ok');
+      var shown = hits.slice(0, 3).map(function (h) { return esc(h); }).join('、');
+      d.innerHTML = '✓ 匹配到 ' + hits.length + ' 个：' + shown
+        + (hits.length > 3 ? ' 等' : '');
+    } else {
+      d.classList.add('bad');
+      d.innerHTML = '✕ 没匹配上，这批设备实际有：'
+        + all.slice(0, 4).map(function (h) { return esc(h); }).join('、')
+        + (all.length > 4 ? ' 等' : '');
+    }
+    cell.appendChild(d);
+  };
+
+  // 规则命中诊断：把「为什么这条规则没提醒」直接摊开给用户看。
+  // 没有这段的话，用户只能看到没通知，却不知道是变量名写错、数值没到、还是被重复间隔限流挡了。
+  function paintRuleDiag() {
+    var box = $('#alDiagBox');
+    if (!box) return;
+    var rs = (RULES && RULES.rules) || [];
+    if (!rs.length) { box.innerHTML = ''; return; }
+    var diag = {};
+    ((WATCH && WATCH.rule_diag) || []).forEach(function (d) { diag[d.id] = d; });
+    var lastRun = WATCH && WATCH.last_run_text ? '最近一轮 ' + WATCH.last_run_text : '尚未完成一轮巡检';
+    var rows = rs.map(function (r, i) {
+      var d = diag[r.id];
+      var txt, cls;
+      if (r.enabled === false) {
+        txt = '已停用，不参与判定'; cls = 'dg-off';
+      } else if (!WATCH || !WATCH.baseline_done) {
+        txt = '监控还没跑完第一轮，第一轮跑完即按命中推送'; cls = 'dg-wait';
+      } else if (!d) {
+        txt = '本轮没有进入判定（账号或设备名筛选没匹配到任何设备）'; cls = 'dg-bad';
+      } else if (d.hit > 0) {
+        // 命中即推送，没有「等持续时长」这一步。这里如实说明本轮推了几条、
+        // 同设备是否被间隔限流挡掉，避免用户以为设置没生效。
+        var times = d.hit;
+        // 命中即推送，没有「等持续时长」这一步。
+        // ★ 必须点明「一台一条」：之前的实现一轮最多只推 3 条、且提醒型通知会排队，
+        //   用户看到的现象是「命中 6 台只推一个」，所以要在这里把条数说清楚。
+        txt = '本轮命中 ' + times + ' 台，'
+          + (RULES && RULES.repeat_mode === 'always'
+              ? '已按设置推送 ' + times + ' 条系统通知（一条一台）'
+                + (RULES.repeat_gap ? '，同设备 ' + RULES.repeat_gap + ' 分钟内不重复'
+                                    : '，同设备每轮都重复提醒')
+              : '新出现的故障各推一条系统通知（一条一台），同一故障不重复推');
+        cls = 'dg-ok';
+      } else if (d.point_hit === 0) {
+        // 变量名一个都没对上。必须把该设备实际有的变量名列出来 ——
+        // 只说「可能写错了」，用户根本不知道该填什么，只能靠猜。
+        var pts = d.dev_points && d.dev_points.length ? d.dev_points : null;
+        txt = '变量名「' + (r.point || '*') + '」一个都没匹配上'
+          + (pts ? '。这台设备实际有：' + pts.map(esc).join('、')
+                  + '（可只填其中几个字，或从下拉里选）'
+                  : '，且该设备没读到任何变量（可能设备离线或未上电）');
+        cls = 'dg-bad';
+      } else if (d.scanned === 0) {
+        txt = '账号/设备名筛选没匹配到设备'; cls = 'dg-bad';
+      } else {
+        // near_read 是当时的实际读数，near_gap 是差值 —— 两个别混用，
+        // 之前这里拿差值当读数显示，写成「最接近的是 24.5」，会让人误以为读数就是 24.5。
+        txt = '变量名匹配到 ' + d.point_hit + ' 个读数，但数值没达到条件';
+        if (d.near_point) {
+          var rd = (d.near_read != null && d.near_read !== '')
+            ? '，最接近的读数是 ' + esc(String(d.near_read)) : '';
+          txt += rd + '（还差 ' + (Math.round(d.near_gap * 100) / 100) + '）';
+        }
+        cls = 'dg-idle';
+      }
+      return '<tr><td class="cen">' + (i + 1) + '</td>'
+        + '<td>' + esc(r.name || '未命名') + '</td>'
+        + '<td class="' + cls + '">' + txt + '</td></tr>';
+    }).join('');
+    box.innerHTML = '<div class="achd" style="margin:0 0 6px">规则命中诊断'
+      + '<span class="hint" style="margin-left:8px">' + lastRun + '</span></div>'
+      + '<table class="rtab"><colgroup><col style="width:6%"><col style="width:22%">'
+      + '<col style="width:72%"></colgroup><tbody>' + rows + '</tbody></table>';
+  }
+
+  function wFilter(f) {
+    WFILTER = f;
+    $$('.wchip[data-f]').forEach(function (b) { b.classList.toggle('on', b.dataset.f === f); });
+    if (WATCH) paintWatch(WATCH);
+  }
+  function renderWatch() {
+    api('/api/watch').then(function (j) { WATCH = j; paintWatch(j); });
+  }
+  function wPoll() {
+    api('/api/watch').then(function (j) {
+      if (!j || j.ok === false) return;
+      WATCH = j;
+      WATCH_ST = j;
+      updateWBar(j);
+      if (document.body.dataset.view === 'watch') paintWatch(j);
+      // 异常提醒页开着时，巡检每轮跑完都要刷新规则命中诊断
+      if (document.body.dataset.view === 'alerts') paintRuleDiag();
+      if (PV_LIVE && document.body.dataset.view === 'watch') refreshLive();   // 实时卡跟随轮询自动刷新
+      // 一轮巡检跑完（last_run 变化）就把列表重新拉一次：新加的账号/设备在首轮之前
+      // 只能显示「未巡」，否则要等用户自己切走再切回来才更新
+      if (j.last_run && j.last_run !== LAST_RUN_SEEN) {
+        LAST_RUN_SEEN = j.last_run;
+        // 只要一轮跑完、列表里还有没拿到实时状态的行，就重拉一次设备列表。
+        // （原来首轮完成时会被 firstSeen 跳过 —— 打开软件后首轮跑完，设备一直停在「未巡」，
+        //   非要等下一轮 15 分钟后才更新）
+        var cur = WDEVS || [];
+        var stale = !cur.length || cur.some(function (d) { return !d.live; });
+        if (stale && document.body.dataset.view === 'watch') refreshDevices(true);
+        // 左侧账号行的台数/在线数来自 /api/accounts（后端会回落到监控实时统计），
+        // 原来只有增删改账号时才刷新，这里补上：一轮跑完顺手拉一次，
+        // 新加的账号不会一直停在「未巡站」
+        if (ACCOUNTS.some(function (a) { return !a.last; })) loadAccounts();
+      }
+    });
+  }
+  function updateWBar(j) {
+    var sub = $('#wSub2');
+    if (!sub) return;
+    var anoms = j.anomalies || [];
+    var nNew = (j.new_ids || []).length;
+    // 按当前账号 + 站点过滤白名单收窄显示范围；设备列表还没加载好时退回全局数字
+    var devs = WDEVS || [];
+    var a = ACCOUNTS.filter(function (x) { return x.name === SEL; })[0];
+    var kws = (SEL && SEL !== '__ALL__' && a && a.kw) ? a.kw : [];
+    var scope = devs.length
+      ? (kws.length ? devs.filter(function (d) {
+          var nm = d.name || '';
+          return kws.some(function (k) { return nm.indexOf(k) >= 0; });
+        }) : devs)
+      : null;
+    var nDev = scope ? scope.length : (j.device_count || 0);
+    var nAnom = scope
+      ? scope.filter(function (d) { return d.anoms && d.anoms.length; }).length
+      : anoms.length;
+    var txt;
+    if (!j.enabled) txt = '实时监控已暂停';
+    else if (j.running) txt = '正在巡检 ' + ((j.progress || [0, 0])[0]) + '/'
+      + ((j.progress || [0, 0])[1]) + ' 台…';
+    else if (j.paused_reason) txt = j.paused_reason;
+    else if (!j.baseline_done) txt = '监控已启动 · 正在跑第一轮巡检';
+    else {
+      var scopeTxt = kws.length
+        ? ('白名单 ' + nDev + ' / ' + devs.length + ' 台')
+        : (nDev + ' 台设备');
+      txt = '监控中 · ' + scopeTxt + ' · 上次 ' + (j.last_run_text || '—')
+        + (j.next_in != null ? ' · 下次 ' + Math.round(j.next_in / 60) + ' 分后' : '')
+        + ' · 异常 ' + nAnom + ' 台'
+        + (!scope && nNew ? '（新 ' + nNew + '）' : '');
+    }
+    sub.textContent = txt;
+    var sb = $('#btnScan');              // 巡检按钮状态跟监控状态走（防止巡检中还能再点）
+    if (sb) { sb.disabled = !!j.running; sb.textContent = j.running ? '巡检中…' : '立即巡检'; }
+    var nn = $('#wAnomN'); if (nn) nn.textContent = nAnom;
+    var tb = $('#wToggleBtn'); if (tb) tb.textContent = j.enabled ? '暂停监控' : '开启监控';
+    var sel = $('#wIvSel'); if (sel && document.activeElement !== sel) sel.value = String(j.interval);
+  }
+  function watchToggleBtn() { watchToggle(!(WATCH_ST && WATCH_ST.enabled)); }
+  var W_TAB = 'live';
+  // ---------- 站点搜索（监控 / 巡站 / 历史三页通用，按设备名即时过滤） ----------
+  var Q_INPUT = { devListW: 'devQW', devList: 'devQP', devListH: 'devQH' };
+  function onDevQ(listId) { applyDevQ(listId); }
+  function applyDevQ(listId) {
+    var box = $('#' + listId); if (!box) return;
+    var inp = Q_INPUT[listId] && $('#' + Q_INPUT[listId]);
+    var q = ((inp && inp.value) || '').trim().toLowerCase();
+    var kids = box.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (!kids[i].classList.contains('drow')) continue;
+      var nm = kids[i].querySelector('.dname');
+      var txt = nm ? nm.textContent.toLowerCase() : '';
+      kids[i].style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
+    }
+  }
+  function wTab(t) {
+    W_TAB = t;
+    var keys = ['live', 'anom'];
+    $$('.ptab').forEach(function (b, i) { if (i < 2) b.classList.toggle('on', keys[i] === t); });
+    $('#pvBodyW').style.display = t === 'live' ? 'flex' : 'none';
+    $('#anomPane').style.display = t === 'anom' ? 'flex' : 'none';
+  }
+  function watchScan() {
+    var btn = $('#btnScan');
+    // 点击立刻给反馈（此前第一遍点击毫无反应，像失灵，用户会去点第二遍）
+    if (btn) { btn.disabled = true; btn.textContent = '巡检中…'; }
+    api('/api/watchscan', { method: 'POST',
+      body: JSON.stringify({ accounts: SEL === '__ALL__' ? null : [SEL] })   // 巡检时强制同步当前选择
+    }).then(function (j) {
+      if (j && j.ok) { wPoll(); setTimeout(wPoll, 1500); }   // 立即拉一次状态，让头部进度马上动起来
+      else {
+        if (btn) { btn.disabled = false; btn.textContent = '立即巡检'; }
+        wPoll();          // 已在巡检中等拒绝场景：刷新状态条即可，不再弹窗打断
+      }
+    }).catch(function () {
+      if (btn) { btn.disabled = false; btn.textContent = '立即巡检'; }
+    });
+  }
+  function watchToggle(on) {
+    api('/api/watchtoggle', { method: 'POST', body: JSON.stringify({ enabled: on }) })
+      .then(function () { setTimeout(wPoll, 400); });
+  }
+  function watchInterval(v) {
+    api('/api/watchinterval', { method: 'POST', body: JSON.stringify({ interval: parseInt(v, 10) }) })
+      .then(function () { setTimeout(wPoll, 400); });
+  }
+  function ruleAdd() {
+    if (!RULES) RULES = { version: 1, stale_minutes: 30, flag_blank: true, notify_builtin: false, rules: [] };
+    RULES.rules = RULES.rules || [];
+    RULES.rules.push({ id: 'r' + Date.now().toString(36), enabled: true, name: '新规则',
+      account: '*', device: '*', point: '*温度*', op: '<', value: 0, value2: '',
+      level: 'warn', note: '' });
+    RU_DIRTY = true;
+    $('#alMsg').textContent = '未保存的新规则已加进列表，填好后点右上角「保存规则」';
+    paintRules();
+  }
+  function ruleDel(i) {
+    if (!RULES || !RULES.rules) return;
+    RULES.rules.splice(i, 1);
+    RU_DIRTY = true;
+    $('#alMsg').textContent = '已删除（未保存），点右上角「保存规则」生效';
+    paintRules();
+  }
+  function ruleSave() {
+    if (!RULES) return;
+    $('#alMsg').textContent = '保存中…';
+    api('/api/watchrules', { method: 'POST', body: JSON.stringify({ rules: RULES }) })
+      .then(function (j) {
+        if (j && j.ok) {
+          RU_DIRTY = false;
+          var n = ((j.rules && j.rules.rules) || []).length;
+          $('#alMsg').textContent = '已保存（' + n + ' 条自定义规则）';
+          paintRules(j.rules);
+          paintRepeatChips();
+        } else {
+          $('#alMsg').textContent = '保存失败：' + ((j && j.msg) || '未知错误');
+        }
+      });
+  }
+  // ---- 重复提醒（对齐手机版：每次巡检都提醒 / 只在状态变化时 + 同设备重复间隔）----
+  function paintRepeatChips() {
+    if (!RULES) return;
+    var rm = RULES.repeat_mode || 'change';
+    $$('.wchip[data-rm]').forEach(function (b) { b.classList.toggle('on', b.dataset.rm === rm); });
+    var rg = String(RULES.repeat_gap == null ? 0 : RULES.repeat_gap);
+    $$('.wchip[data-rg]').forEach(function (b) { b.classList.toggle('on', b.dataset.rg === rg); });
+  }
+  function setRepeatMode(m) {
+    if (!RULES) RULES = { rules: [] };
+    RULES.repeat_mode = (m === 'always') ? 'always' : 'change';
+    RU_DIRTY = true;
+    paintRepeatChips();
+    // 与「提醒方式」一致：点一下就落盘，不要求用户再记得点右上角保存
+    saveRepeatOnly('重复提醒方式已生效：' + (RULES.repeat_mode === 'always' ? '每次巡检都提醒' : '只在状态变化时提醒'));
+  }
+  function setRepeatGap(v) {
+    if (!RULES) RULES = { rules: [] };
+    RULES.repeat_gap = parseInt(v, 10) || 0;
+    RU_DIRTY = true;
+    paintRepeatChips();
+    saveRepeatOnly('同设备重复间隔已生效：' + (RULES.repeat_gap ? RULES.repeat_gap + ' 分钟内不重复提醒' : '不限制（每轮命中都提醒）'));
+  }
+  function saveRepeatOnly(msg) {
+    var box = $('#alMsg');
+    if (box) box.textContent = '保存中…';
+    api('/api/watchrules', { method: 'POST', body: JSON.stringify({ rules: RULES }) })
+      .then(function (j) {
+        if (box) {
+          box.textContent = (j && j.ok) ? msg : ('保存失败：' + ((j && j.msg) || '未知错误'));
+        }
+        if (j && j.ok) {
+          RU_DIRTY = false;
+          if (j.rules) RULES = JSON.parse(JSON.stringify(j.rules));
+          paintRepeatChips();
+          paintBuiltinChips();
+        }
+      })
+      .catch(function () { if (box) box.textContent = '保存失败：后端无响应'; });
+  }
+  // ---- 内置规则（离线 / 数据停更 / 采集异常）是否推送：点一下即保存、立即生效 ----
+  function paintBuiltinChips() {
+    if (!RULES) return;
+    var nb = RULES.notify_builtin === true;   // 缺省 = 不推送（只推自定义规则）
+    $$('.wchip[data-nb]').forEach(function (b) {
+      b.classList.toggle('on', (b.dataset.nb === '1') === nb);
+    });
+  }
+  function setNotifyBuiltin(v) {
+    if (!RULES) RULES = { rules: [] };
+    RULES.notify_builtin = !!v;
+    RU_DIRTY = true;
+    paintBuiltinChips();
+    saveRepeatOnly('内置规则提醒已生效：' + (RULES.notify_builtin
+      ? '设备离线 / 数据停更 / 采集异常也会推送'
+      : '不再推送，只推自定义规则命中的提醒'));
+  }
+  function renderAlerts() {
+    api('/api/settings').then(function (j) {
+      if (j && j.ok) paintNotifyChips(j.notify_mode || 'both');
+    }).catch(function () {});
+    api('/api/notifyhealth').then(function (j) {
+      if (j && j.ok) paintHealth(j.health);
+    }).catch(function () {});
+    api('/api/watchcatalog').then(function (j) {
+      if (j && j.ok) {
+        WC = j;
+        $('#alPts').innerHTML = (j.points || []).map(function (p) {
+          return '<option value="' + esc(p) + '">';
+        }).join('');
+      }
+      api('/api/watch').then(function (j2) {
+        if (j2 && j2.ok !== false && !RU_DIRTY) {
+          RULES = JSON.parse(JSON.stringify(j2.rules));
+          paintRules();
+        }
+      });
+    }).catch(function () {
+      api('/api/watch').then(function (j2) {
+        if (j2 && j2.ok !== false && !RU_DIRTY) {
+          RULES = JSON.parse(JSON.stringify(j2.rules));
+          paintRules();
+        }
+      });
+    });
+  }
+  function paintNotifyChips(nm) {
+    $$('.wchip[data-m]').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.m === nm);
+    });
+  }
+  // macOS 没有任务栏：把「任务栏闪烁」的说法换成它在本机的实际行为（程序坞图标弹跳），
+  // 免得选了之后以为坏了 —— 弹跳只在窗口不在前台时出现，用户点开窗口才停。
+  (function () {
+    if (!/Mac|darwin/i.test(navigator.userAgent)) return;
+    var b = document.querySelector('.wchip[data-m="flash"]');
+    if (b) {
+      b.textContent = '程序坞弹跳';
+      b.title = '窗口不在前台时，程序坞图标持续弹跳直到点开窗口';
+    }
+    var h = document.getElementById('alHintMain');
+    if (h) {
+      h.innerHTML = '监控每轮巡检发现<b>新异常</b>或<b>异常恢复</b>时提醒一次，'
+        + '<b>一轮命中几台就提醒几条</b>。提醒通道统一为系统通知（右上角可切换是否同时做程序坞图标弹跳）。'
+        + '数据监控页的「异常提醒」列表仍保留全部历史异常，不受影响。';
+    }
+  })();
+  // 系统通知通道真实状态：由外壳在每次实际投递后回报。
+  //   全程序只有一条提醒通道 —— 系统通知：
+  //     Windows 看 ps（独立 PowerShell 子进程 + WinRT 投递，不占用主进程，不会拖崩软件）；
+  //     macOS   看 as（osascript 投递）。
+  //   native 字段保留兼容但已无任何代码会写入（Electron 原生通知整段删除）。
+  function paintHealth(h) {
+    var el = $('#alHealth');
+    if (!el) return;
+    h = h || {};
+    var isMac = /Mac|darwin/i.test(navigator.userAgent);
+    var primary = isMac ? h.as : h.ps;
+    if (primary === true) {
+      el.innerHTML = '系统通知通道：<b style="color:#2E7D57">可用</b>　最近一次投递成功，'
+        + '软件在前台或后台都会弹系统通知。'
+        + (isMac ? '（macOS 经系统脚本通道投递）' : '（Windows 经独立子进程投递，不影响本程序稳定性）');
+    } else if (primary === false) {
+      el.innerHTML = '系统通知通道：<b style="color:#B26A00">本机不可用</b>　'
+        + '系统拒绝了通知投递，请按下面步骤检查后重开软件（软件内不再有横幅兜底，渠道只有这一个）：'
+        + (isMac
+            ? '系统设置 → 通知，确认允许本程序通知、且未处于专注模式。'
+            : '设置 → 系统 → 通知和操作，确认总开关已打开，且列表里 PowerShell 那一项允许通知。');
+    } else {
+      el.textContent = '系统通知通道：尚未投递过，点右上角「发送测试提醒」可检测本机是否可用。'
+        + (isMac ? '（macOS 切到其它窗口后才会收到系统通知）' : '');
+    }
+  }
+  function refreshHealth() {
+    api('/api/notifyhealth').then(function (j) {
+      if (j && j.ok) paintHealth(j.health);
+    }).catch(function () {});
+  }
+  function setNotifyMode(m) {
+    paintNotifyChips(m);
+    try { localStorage.setItem('usrcloud_notify', m); } catch (e) {}
+    $('#alNotifyMsg').textContent = '保存中…';
+    api('/api/settings', { method: 'POST', body: JSON.stringify({ notify_mode: m }) })
+      .then(function (j) {
+        $('#alNotifyMsg').textContent = (j && j.ok) ? '已保存 ✓'
+          : '保存失败：' + ((j && j.msg) || '');
+        setTimeout(function () { $('#alNotifyMsg').textContent = ''; }, 3000);
+      }).catch(function () {
+        $('#alNotifyMsg').textContent = '保存失败（后端未响应）';
+      });
+  }
+  function notifyTest() {
+    // 测试提醒：真投一条系统通知（现在唯一的提醒通道）。
+    // 以前这里有两个毛病：① 就地弹应用内横幅 —— 那是「软件内的推送」，只在窗口
+    // 前台可见、切走就收不到，用户明确说不可信；② 事件带 force 标记，让外壳在前台
+    // 也去调 win.flashFrame —— 那条 Windows 合成器路径会把主进程带崩（点一下就闪退）。
+    // 现在两个都不做：只把事件交给后端，外壳用和真实告警完全相同的那一套逻辑投递，
+    // 测出来的结果才等于现场真实效果。
+    $('#alNotifyMsg').textContent = '正在投递…几秒内应弹出系统通知';
+    api('/api/notifytest', { method: 'POST', body: '{}' })
+      .then(function (j) {
+        var mode = (j && j.notify_mode) || '';
+        if (!(j && j.ok)) {
+          $('#alNotifyMsg').textContent = '投递失败：' + ((j && j.msg) || '后端未响应');
+        } else if (mode === 'off') {
+          $('#alNotifyMsg').textContent = '注意：当前「异常提醒方式」是「不提醒」，投出去也不会有任何提示';
+        } else if (mode === 'flash') {
+          $('#alNotifyMsg').textContent = '已发出。当前方式只做任务栏闪烁，窗口不在前台时才看得见';
+        } else {
+          $('#alNotifyMsg').textContent = '已发出，请查看屏幕右下角或通知中心';
+        }
+        setTimeout(function () { $('#alNotifyMsg').textContent = ''; }, 9000);
+        // 等外壳完成系统通知投递（约 5 秒轮询 + 投递），把真实通道状态刷出来
+        setTimeout(refreshHealth, 9000);
+        setTimeout(refreshHealth, 16000);
+      }).catch(function () {
+        $('#alNotifyMsg').textContent = '投递失败：后端未响应';
+        setTimeout(function () { $('#alNotifyMsg').textContent = ''; }, 6000);
+      });
+  }
+  // ---- 应用内提醒横幅（showBanner / #nbBox / 轮询）已整段删除 ----
+  // 它只在窗口前台显示、一轮命中多台时最多同时显示 3 条，切走窗口就什么都收不到。
+  // 用户要求「只保留一个通道」，现在唯一的通道就是系统通知：
+  // 前端不再轮询 /api/notifypoll，事件由外壳统一消费并投递。
+  // 注意：WC 原本和横幅变量写在同一行 var 里，删横幅时别把它一起删了 ——
+  // 监控设备目录（账号/设备/变量名）缓存，规则下拉防错输要用。
+  var WC = null;
+  function locateIdx(i) {
+    var a = (WLIST || [])[i];
+    if (!a) return;
+    if (document.body.dataset.view !== 'watch') setView('watch');
+    if (SEL !== a.acc) selectAccount(a.acc);
+    var tries = 0;
+    var t = setInterval(function () {
+      tries++;
+      var rows = $$('#devListW .drow'), hit = null;
+      for (var k = 0; k < rows.length; k++) {
+        var nm = rows[k].querySelector('.dname');
+        if (nm && nm.textContent === a.dev_name) { hit = rows[k]; break; }
+      }
+      if (hit) {
+        clearInterval(t);
+        hit.click();
+        hit.scrollIntoView({ block: 'center' });
+      } else if (tries > 40) { clearInterval(t); }
+    }, 250);
+  }
+
+  // ---------- 历史数据页（折线图） ----------
+  var HCUR = null, HISTDATA = null, HSEL = [], HNAMES = [];
+  var HCOLORS = ['#2F6BFF', '#E5484D', '#12A150', '#C77700', '#8E4EC6', '#008EA0'];
+  // 变量展示优先级：进出水温度 > 压力 > 能源 > 其它温度 > 其余（同级保持原顺序）
+  var HVAR_PRIO = [
+    [/(供|回|进|出)水温度|水温/, 0],
+    [/压力|压差|水压/, 1],
+    [/能耗|电量|电能|能源|功率|用电|频率/, 2],
+    [/温度/, 3]
+  ];
+  function varPrio(n) {
+    for (var i = 0; i < HVAR_PRIO.length; i++) if (HVAR_PRIO[i][0].test(n)) return HVAR_PRIO[i][1];
+    return 9;
+  }
+  function varSort(arr) {
+    return arr.slice().sort(function (a, b) { return varPrio(a) - varPrio(b); });
+  }
+  function histPick(d) {
+    HCUR = { acc: d._acc || SEL || '', no: d.no, name: d.name || d.no || '' };
+    HSEL = []; HISTDATA = null;
+    renderHist();
+  }
+  function histReload() { if (HCUR) renderHist(); }
+  function histSave() {
+    if (!HCUR) { alert('请先在左侧点一台设备，再保存它的历史数据'); return; }
+    var btn = $('#btnHistSave');
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+    var hours = parseInt($('#hRange').value, 10) || 24;
+    api('/api/watchhistsave', { method: 'POST', body: JSON.stringify({
+      account: HCUR.acc, no: HCUR.no, hours: hours, vars: HSEL.slice()
+    })}).then(function (j) {
+      if (btn) { btn.disabled = false; btn.textContent = '保存到本地'; }
+      if (!j || !j.ok) { alert((j && j.msg) || '保存失败'); return; }
+      var msg;
+      if (j.saved > 0) {
+        msg = '已保存 ' + j.saved + ' 个数据点 → ' + (j.files || []).join('、');
+      } else {
+        msg = '没有新数据点' + (j.skipped ? '（' + j.skipped + ' 个已存在，跳过）' : '');
+      }
+      var meta = $('#histMeta');
+      if (meta) meta.textContent = msg;
+    }).catch(function () {
+      if (btn) { btn.disabled = false; btn.textContent = '保存到本地'; }
+    });
+  }
+  function renderHist() {
+    var body = $('#histBody');
+    if (!body || !HCUR) return;
+    var srcEl = $('#hSrc'), src = srcEl ? srcEl.value : 'local';
+    body.innerHTML = src === 'local'
+      ? '<div class="phold">正在读取「' + esc(HCUR.name) + '」的本地监控记录…</div>'
+      : '<div class="phold">正在拉取「' + esc(HCUR.name) + '」的历史数据…<br><span style="font-size:12px;color:#8A9099">时间范围越长耗时越久（近 30 天约 20 秒），请稍候</span></div>';
+    $('#histMeta').textContent = '';
+    var hours = parseInt($('#hRange').value, 10) || 24;
+    api('/api/watchhist?account=' + encodeURIComponent(HCUR.acc)
+      + '&no=' + encodeURIComponent(HCUR.no) + '&hours=' + hours + '&src=' + src)
+      .then(function (j) {
+        if (!HCUR) return;
+        if (!j || !j.ok) { body.innerHTML = '<div class="phold">' + esc((j && j.msg) || '历史数据获取失败') + '</div>'; return; }
+        HISTDATA = j;
+        if (!HSEL.length) {
+          HSEL = varSort(Object.keys(j.series || {}).filter(function (n) { return (j.series[n] || []).length; })).slice(0, 2);
+        }
+        paintHist();
+      });
+  }
+  function histToggleI(i) {
+    var n = HNAMES[i];
+    if (!n) return;
+    var k = HSEL.indexOf(n);
+    if (k >= 0) { if (HSEL.length > 1) HSEL.splice(k, 1); }   // 至少保留一条曲线
+    else { HSEL.push(n); if (HSEL.length > 4) HSEL.shift(); }
+    paintHist();
+  }
+  function paintHist() {
+    var j = HISTDATA, body = $('#histBody');
+    if (!j || !body) return;
+    var series = j.series || {};
+    var names = varSort(Object.keys(series).filter(function (n) { return (series[n] || []).length; }));
+    HSEL = varSort(HSEL);                 // 已选曲线顺序与 chips 一致
+    HNAMES = names;
+    if (!names.length) {
+      body.innerHTML = '<div class="phold">「' + esc(HCUR.name) + '」在这个时间段没有历史数据。<br>设备未上报或平台未存储。</div>';
+      $('#histMeta').textContent = '';
+      return;
+    }
+    var unitOf = {};
+    (j.vars || []).forEach(function (v) { unitOf[v.name] = v.unit || ''; });
+    var chips = names.map(function (n, i) {
+      var last = series[n][series[n].length - 1];
+      return '<button class="hchip' + (HSEL.indexOf(n) >= 0 ? ' on' : '') + '" onclick="histToggleI(' + i + ')">'
+        + '<span class="sw" style="background:' + HCOLORS[i % HCOLORS.length] + '"></span>'
+        + esc(n) + (last ? ' ' + esc(last[1]) + esc(unitOf[n] || '') : '') + '</button>';
+    }).join('');
+    body.innerHTML = '<div class="hwrap"><div class="htop">' + chips + '</div>'
+      + '<div class="hchart"><canvas id="histCanvas"></canvas></div></div>';
+    $('#histMeta').textContent = (j.source === 'local' ? '本地记录 · ' : '')
+      + '近 ' + (j.hours >= 48 ? Math.round(j.hours / 24) + ' 天' : j.hours + ' 小时')
+      + ' · ' + Math.min(HSEL.length, HSEL.length) + ' 条曲线';
+    drawHist(series);
+  }
+  function drawHist(series) {
+    var cv = $('#histCanvas'); if (!cv) return;
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.clientWidth, h = cv.clientHeight;
+    if (w < 60 || h < 60) return;
+    cv.width = w * dpr; cv.height = h * dpr;
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var names = HSEL.filter(function (n) { return (series[n] || []).length; });
+    if (!names.length) return;
+    var data = names.map(function (n) {
+      return series[n].map(function (p) { return [p[0], parseFloat(p[1])]; })
+        .filter(function (p) { return !isNaN(p[1]); });
+    }).filter(function (s) { return s.length; });
+    if (!data.length) return;
+    var mn = Infinity, mx = -Infinity, t0 = Infinity, t1 = -Infinity;
+    data.forEach(function (s) { s.forEach(function (p) {
+      if (p[1] < mn) mn = p[1]; if (p[1] > mx) mx = p[1];
+      if (p[0] < t0) t0 = p[0]; if (p[0] > t1) t1 = p[0];
+    }); });
+    if (mn === mx) { mn -= 1; mx += 1; }
+    var pad = (mx - mn) * 0.08; mn -= pad; mx += pad;
+    if (t0 === t1) { t1 = t0 + 60000; }
+    var L = 52, R = 14, T = 12, B = 28;
+    var X = function (t) { return L + (w - L - R) * (t - t0) / (t1 - t0); };
+    var Y = function (v) { return T + (h - T - B) * (1 - (v - mn) / (mx - mn)); };
+    ctx.font = '10.5px system-ui,sans-serif';
+    ctx.strokeStyle = '#EEF0F3'; ctx.fillStyle = '#8A9099'; ctx.lineWidth = 1;
+    for (var i = 0; i <= 4; i++) {
+      var vv = mn + (mx - mn) * i / 4, yy = Y(vv);
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(w - R, yy); ctx.stroke();
+      var lb = Math.abs(vv) >= 1000 ? (Math.round(vv / 100) / 10) + 'k' : String(Math.round(vv * 10) / 10);
+      ctx.textAlign = 'right'; ctx.fillText(lb, L - 6, yy + 3.5);
+    }
+    var span = t1 - t0;
+    for (var i2 = 0; i2 <= 4; i2++) {
+      var tt = t0 + span * i2 / 4, d = new Date(tt);
+      var lab = span > 3 * 86400000
+        ? ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2)
+        : ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+      ctx.textAlign = i2 === 0 ? 'left' : (i2 === 4 ? 'right' : 'center');
+      ctx.fillText(lab, X(tt), h - 8);
+    }
+    names.forEach(function (n) {
+      var s = (series[n] || []).map(function (p) { return [p[0], parseFloat(p[1])]; })
+        .filter(function (p) { return !isNaN(p[1]); });
+      if (s.length < 2) return;
+      ctx.strokeStyle = HCOLORS[(HNAMES.indexOf(n) >= 0 ? HNAMES.indexOf(n) : 0) % HCOLORS.length];
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      var stride = Math.max(1, Math.floor(s.length / (w * 2)));
+      for (var i3 = 0; i3 < s.length; i3 += stride) {
+        if (i3 === 0) ctx.moveTo(X(s[i3][0]), Y(s[i3][1]));
+        else ctx.lineTo(X(s[i3][0]), Y(s[i3][1]));
+      }
+      ctx.lineTo(X(s[s.length - 1][0]), Y(s[s.length - 1][1]));
+      ctx.stroke();
+    });
+  }
+  window.addEventListener('resize', function () {
+    if (document.body.dataset.view === 'history' && HISTDATA && HCUR) paintHist();
+  });
+
+  // ---------- 视图切换 ----------
+  function setView(v) {
+    document.body.dataset.view = v;
+    $$('.rail .ic').forEach(function (b) { b.classList.toggle('on', b.dataset.view === v); });
+    if (v === 'accounts') renderAccountsView();
+    if (v === 'watch') { renderWatch(); refreshDevices(); }
+    if (v === 'alerts') renderAlerts();
+    if (v === 'patrol') refreshDevices();
+    if (v === 'history') refreshDevices();
+  }
+  $$('.rail .ic').forEach(function (b) {
+    b.onclick = function () {
+      setView(b.dataset.view);
+    };
+  });
+
+  // 点击系统通知跳转到数据监控页的指定站点：切到监控页 → 选中对应账号 → 等设备列表就绪后定位该设备并加载实时数据。
+  function gotoWatch(acc, no, name) {
+    setView('watch');
+    NAV_TARGET = { acc: acc, no: no || '', name: name || '' };   // 见 selectAccount / renderDevices 里的优先处理
+    if (SEL !== acc) selectAccount(acc);   // 切到对应账号（异步刷新列表），后续轮询等就绪
+    var pick = function () {
+      if (SEL !== acc) return false;        // 账号还没切过去，等下次轮询
+      if (DEVS_READY_SEL !== acc) return false;   // 列表还是上一个账号的，别拿它凑数
+      var devs = CUR_DEVS || [];
+      var d = (devs || []).filter(function (x) {
+        // 账号刚切、列表可能还是上一批：认出设备归属，别拿旧列表里的同名设备凑数
+        if ((x._acc || SEL) !== acc) return false;
+        return (no && x.no === no) || (!no && name && x.name === name);
+      })[0];
+      if (!d) return false;
+      if (typeof wTab === 'function' && typeof W_TAB !== 'undefined' && W_TAB !== 'live') {
+        try { wTab('live'); } catch (e) { /* ignore */ }   // 在异常/规则页签下点通知 → 切回实时数据
+      }
+      var row = document.querySelector('#devListW .drow[data-no="' + (d.no || '') + '"]');
+      $$('#devListW .drow').forEach(function (r) { r.classList.toggle('on', r === row); });
+      if (!row) {
+        var rows = $$('#devListW .drow');
+        for (var i = 0; i < rows.length; i++) {
+          if (name && rows[i].textContent.indexOf(name) >= 0) { rows[i].classList.add('on'); row = rows[i]; break; }
+        }
+      }
+      renderLiveCard(d);
+      NAV_TARGET = null;
+      return true;
+    };
+    var tries = 0;
+    var tick = function () {
+      if (pick()) return;
+      if (++tries < 30) setTimeout(tick, 200);
+      else NAV_TARGET = null;             // 6 秒还没等到（设备被删/账号停用），别一直拦着自动选中
+    };
+    setTimeout(tick, 350);
+    return 'gotoWatch ' + acc + '/' + (no || name || '');
+  }
+  window.gotoWatch = gotoWatch;
+
+  // 设置项：服务端持久化（运行参数.json）+ 本地缓存兑底；改动后需点「保存设置」
+  // 异常提醒方式已移到「异常提醒」页（即改即存），设置页不再重复展示
+  (function initSettings() {
+    function apply(w) {
+      if (w) $('#setWorkers').value = w;
+    }
+    // 先用本地缓存兑底（file:// 预览等无后端场景）
+    try {
+      var _w = localStorage.getItem('usrcloud_workers');
+      if (_w) $('#setWorkers').value = _w;
+      localStorage.removeItem('usrcloud_keep');   // 旧版残留的"保留历史批次"开关，已废弃
+    } catch (e) {}
+    api('/api/settings').then(function (j) {
+      if (j && j.ok) apply(j.workers);
+    }).catch(function () {});
+    // 关闭按钮行为：与后端 关闭方式.json 同一份数据，改完即存，不并入「保存设置」
+    api('/api/closemode').then(function (j) {
+      if (j && j.ok) paintCloseChips(j.mode);
+    }).catch(function () {});
+    function paintCloseChips(m) {
+      $$('.wchip[data-cm]').forEach(function (b) { b.classList.toggle('on', b.dataset.cm === m); });
+    }
+    window.setCloseMode = function (m) {
+      if (['ask', 'tray', 'exit'].indexOf(m) < 0) return;
+      paintCloseChips(m);
+      var msg = $('#setCloseMsg');
+      var txt = { ask: '每次点关闭按钮都会先让你选「收到托盘图标」还是「直接关闭」',
+                  tray: '点关闭按钮会直接收进托盘，巡检与异常提醒继续在后台运行',
+                  exit: '点关闭按钮会直接退出程序，后台巡检一并停止' }[m];
+      if (msg) { msg.textContent = '保存中…'; msg.style.color = '#9CA3AF'; }
+      api('/api/closemode', { method: 'POST', body: JSON.stringify({ mode: m }) })
+        .then(function (j) {
+          if (!msg) return;
+          msg.textContent = (j && j.ok) ? txt : '保存失败：后端未响应';
+          msg.style.color = (j && j.ok) ? '#12A150' : '#D9383D';
+        })
+        .catch(function () {
+          if (msg) { msg.textContent = '保存失败：后端未连接'; msg.style.color = '#D9383D'; }
+        });
+    };
+    window.saveSettings = function () {
+      var w = parseInt($('#setWorkers').value, 10) || 4;
+      if (w < 1) w = 1; if (w > 8) w = 8;
+      $('#setWorkers').value = w;
+      try {
+        localStorage.setItem('usrcloud_workers', String(w));
+      } catch (e) {}
+      var msg = $('#setMsg');
+      api('/api/settings', { method: 'POST', body: JSON.stringify({ workers: w }) })
+        .then(function (j) {
+          if (msg) { msg.textContent = (j && j.ok) ? '已保存 ✓ 重启软件仍生效' : '保存失败'; msg.style.color = (j && j.ok) ? '#12A150' : '#D9383D'; }
+        }).catch(function () {
+          if (msg) { msg.textContent = '后端未连接，仅本地记忆'; msg.style.color = '#C77700'; }
+        });
+    };
+  })();
+
+  // ---------- 关闭窗口方式选择（Electron 侧调 __askClose 打开） ----------
+  // 用页面内弹窗而不是 Electron 原生 MessageBox：原生框与本软件视觉完全不一致，
+  // 且 showMessageBox 的回调在部分环境下不触发（实测点了按钮窗口也不消失）。
+  // 这里返回 Promise，由页面 resolve 出用户的选择，Electron 用 executeJavaScript 取结果。
+  var CO_SEL = 'tray', CO_RESOLVE = null;
+  function closeDone(choice, remember) {
+    var m = $('#closeModal');
+    if (m) m.classList.remove('show');
+    var r = CO_RESOLVE; CO_RESOLVE = null;
+    if (r) r({ choice: choice, remember: !!remember });
+  }
+  function pickClose(v) {
+    if (v === '__ok') { closeDone(CO_SEL, $('#coRemember') && $('#coRemember').checked); return; }
+    if (v === 'cancel') { closeDone('cancel', false); return; }
+    CO_SEL = v;
+    var t = $('#coTray'), e2 = $('#coExit');
+    if (t) t.classList.toggle('on', v === 'tray');
+    if (e2) e2.classList.toggle('on', v === 'exit');
+  }
+  window.__askClose = function () {
+    return new Promise(function (resolve) {
+      CO_RESOLVE = resolve;
+      CO_SEL = 'tray';
+      var t = $('#coTray'), e2 = $('#coExit');
+      if (t) t.classList.add('on');
+      if (e2) e2.classList.remove('on');
+      var rk = $('#coRemember'); if (rk) rk.checked = false;
+      var m = $('#closeModal'); if (m) m.classList.add('show');
+    });
+  };
+  window.pickClose = pickClose;   // 内联 onclick 只能看到 window 上的名字（与本文件其他导出同一原因）
+  // 兜底：弹窗被 Esc 关掉时也要给 Electron 一个答复，否则窗口永远卡在"已拦截"
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && $('#closeModal').classList.contains('show')) {
+      closeDone('cancel', false);
+    }
+  });
+
+  // ---------- 站点选择弹窗 ----------
+  function appendItems(box, devs, acc) {
+    var pre = SITE_SEL[acc];
+    devs.forEach(function (d) {
+      var no = d.no || d.name || '';
+      var lab = document.createElement('label'); lab.className = 'mitem';
+      var chk = document.createElement('input'); chk.type = 'checkbox';
+      chk.value = no; chk.dataset.acc = acc;
+      chk.checked = pre ? (pre.indexOf(no) >= 0) : true;
+      lab.appendChild(chk);
+      lab.insertAdjacentHTML('beforeend', '<span>' + esc(d.name || no) + '</span><span class="no">' + esc(no) + '</span>');
+      box.appendChild(lab);
+    });
+  }
+  function openSiteModal() {
+    if (!SEL) { alert('请先在左侧选择一个账号'); return; }
+    var isAll = SEL === '__ALL__';
+    $('#smTitle').textContent = '选择站点 · ' + (isAll ? '全部账号' : SEL);
+    var build = function (devs) {
+      if (!devs.length) { alert(isAll ? '没有任何设备' : '该账号下没有设备'); return; }
+      var box = $('#smList'); box.innerHTML = '';
+      if (isAll) {
+        ACCOUNTS.forEach(function (a) {                    // 按账号分组，选择仍按账号记忆
+          var ds = devs.filter(function (d) { return d._acc === a.name; });
+          if (!ds.length) return;
+          var g = document.createElement('div'); g.className = 'mgrp';
+          g.textContent = a.name + '（' + ds.length + ' 台）';
+          box.appendChild(g);
+          appendItems(box, ds, a.name);
+        });
+      } else {
+        appendItems(box, devs, SEL);
+      }
+      $('#siteModal').classList.add('show');
+    };
+    if (CUR_DEVS.length) { build(CUR_DEVS); return; }
+    if (DEMO) {
+      var md = [];
+      if (isAll) ACCOUNTS.forEach(function (a) { (DEMO_DEVS[a.name] || []).forEach(function (d) { md.push(withAcc(d, a.name)); }); });
+      else (DEMO_DEVS[SEL] || []).forEach(function (d) { md.push(withAcc(d, SEL)); });
+      build(md); return;
+    }
+    if (isAll) {
+      Promise.all(ACCOUNTS.map(function (a) {
+        return api('/api/devices?account=' + encodeURIComponent(a.name) + '&live=0').then(function (j) {
+          return (j && j.ok) ? (j.devices || []).map(function (d) { return withAcc(d, a.name); }) : [];
+        });
+      })).then(function (arrs) { var m = [].concat.apply([], arrs); renderDevices(m, 'devList', 'devFoot', false); build(m); });
+      return;
+    }
+    api('/api/devices?account=' + encodeURIComponent(SEL) + '&live=0').then(function (j) {
+      if (j.ok) { renderDevices(j.devices || [], 'devList', 'devFoot', false); build(CUR_DEVS); }
+      else { alert('获取设备失败：' + (j.msg || '')); }
+    });
+  }
+  function closeSiteModal() { $('#siteModal').classList.remove('show'); }
+  $('#siteModal').onclick = function (e) { if (e.target === this) closeSiteModal(); };
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); } });
+
+  // ---------- 往期截图清理 ----------
+  var BATCHES = [], BM_SEL = {}, BM_ARM = false, BM_LATEST = '', BM_CUR = '';
+  function fmtSize(n) {
+    n = Number(n) || 0;
+    var u = ['B', 'KB', 'MB', 'GB'], i = 0;
+    while (n >= 1024 && i < 3) { n /= 1024; i++; }
+    return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+  }
+  function openBatchModal() {
+    var m = $('#batchModal'); if (!m) return;
+    m.classList.add('show');
+    BM_ARM = false; BM_SEL = {};
+    bmBtnReset();
+    $('#bmSum').textContent = '';
+    $('#bmList').innerHTML = '<div style="padding:12px;font-size:12px;color:#8A9099">正在读取往期批次…</div>';
+    api('/api/batches').then(function (j) {
+      if (!j || !j.ok) {
+        $('#bmList').innerHTML = '<div style="padding:12px;font-size:12px;color:#D9383D">读取失败，请稍后重试</div>';
+        return;
+      }
+      BATCHES = j.batches || [];
+      BM_LATEST = j.latest || ''; BM_CUR = j.current || '';
+      renderBatches();
+    }).catch(function () {
+      $('#bmList').innerHTML = '<div style="padding:12px;font-size:12px;color:#D9383D">后端未连接</div>';
+    });
+  }
+  function closeBatchModal() { var m = $('#batchModal'); if (m) m.classList.remove('show'); }
+  function bmLocked(name) { return name === BM_LATEST || name === BM_CUR; }
+  function renderBatches() {
+    var box = $('#bmList'); box.innerHTML = '';
+    if (!BATCHES.length) {
+      box.innerHTML = '<div style="padding:12px;font-size:12px;color:#8A9099">没有往期批次。</div>';
+      bmSum(); return;
+    }
+    BATCHES.forEach(function (b) {
+      var locked = bmLocked(b.name);
+      var row = document.createElement('label');
+      row.className = 'brow' + (locked ? ' lk' : '');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.disabled = locked; cb.checked = !!BM_SEL[b.name];
+      cb.onchange = function () { BM_SEL[b.name] = cb.checked; bmArmReset(); bmSum(); };
+      var n1 = document.createElement('span'); n1.className = 'bn';
+      n1.textContent = b.name.replace('_截图', '') + (locked ? '（最新批次）' : '');
+      var n2 = document.createElement('span'); n2.className = 'bm';
+      n2.textContent = b.orphan
+        ? ('仅剩压缩包 ' + fmtSize(b.zip_size) + ' · 截图目录已被旧版自动清理删掉')
+        : (b.png + ' 张 · ' + fmtSize(b.size)
+           + (b.zip ? ' · 压缩包 ' + fmtSize(b.zip_size) : ' · 无压缩包'));
+      row.appendChild(cb); row.appendChild(n1); row.appendChild(n2);
+      box.appendChild(row);
+    });
+    bmSum();
+  }
+  function bmSum() {
+    var n = 0, sz = 0, all = 0;
+    BATCHES.forEach(function (b) {
+      var one = (b.size || 0) + (b.zip_size || 0);
+      all += one;
+      if (BM_SEL[b.name]) { n++; sz += one; }
+    });
+    var sm = $('#bmSum');
+    sm.style.color = '#8A9099';
+    sm.textContent = n
+      ? ('已选 ' + n + ' 个批次 · 将释放约 ' + fmtSize(sz))
+      : ('共 ' + BATCHES.length + ' 个往期批次 · 占用 ' + fmtSize(all));
+  }
+  function bmBtnReset() {                 // 按钮恢复常态（红色描边）
+    var btn = $('#bmDel'); if (!btn) return;
+    btn.textContent = '删除选中'; btn.disabled = false;
+    btn.style.background = '#fff'; btn.style.color = '#D9383D'; btn.style.borderColor = '#F3C9CB';
+  }
+  function bmArmReset() {                 // 改动勾选就撤销“待确认”状态
+    if (!BM_ARM) return;
+    BM_ARM = false;
+    bmBtnReset();
+    bmSum();
+  }
+  function bmAll(on) {
+    BATCHES.forEach(function (b) { if (!bmLocked(b.name)) BM_SEL[b.name] = !!on; });
+    BM_ARM = false;
+    bmBtnReset();
+    renderBatches();
+  }
+  function bmDelete() {
+    var names = Object.keys(BM_SEL).filter(function (k) { return BM_SEL[k]; });
+    if (!names.length) { $('#bmSum').textContent = '请先勾选要删除的批次'; return; }
+    if (!BM_ARM) {                        // 删除不可恢复：第二次点击才真正执行
+      BM_ARM = true;
+      var b1 = $('#bmDel');
+      b1.textContent = '再点一次确认删除 ' + names.length + ' 项';
+      b1.style.background = '#D9383D'; b1.style.color = '#fff'; b1.style.borderColor = '#D9383D';
+      var sm = $('#bmSum');
+      sm.textContent = '⚠ 将删除选中的 ' + names.length + ' 项（截图目录及对应压缩包），不可恢复——请再点一次右侧红色按钮';
+      sm.style.color = '#D9383D';
+      return;
+    }
+    var btn = $('#bmDel');
+    btn.disabled = true; btn.textContent = '删除中…';
+    api('/api/batchdel', { method: 'POST', body: JSON.stringify({ names: names }) })
+      .then(function (j) {
+        BM_ARM = false; bmBtnReset();
+        if (!j || !j.ok) { $('#bmSum').textContent = (j && j.msg) || '删除失败'; return; }
+        var fail = j.failed || [];
+        var sm = $('#bmSum');
+        sm.textContent = '已删除 ' + (j.deleted || []).length + ' 个批次，释放 '
+          + (j.freed_text || '0 B')
+          + (j.pending ? ('；其中 ' + j.pending + ' 个被 OneDrive 占用，文件正在后台清理，'
+            + '资源管理器里的 _del_ 文件夹几分钟后会自动消失') : '')
+          + (fail.length ? ('；' + fail.length + ' 个失败：' + fail[0].msg) : '');
+        sm.style.color = j.pending ? '#C77700' : '#12A150';
+        BM_SEL = {};
+        api('/api/batches').then(function (k) {
+          if (k && k.ok) { BATCHES = k.batches || []; BM_LATEST = k.latest || ''; BM_CUR = k.current || ''; renderBatches(); }
+        });
+        AUTO_PICK = {};                   // 截图可能被删，让三页重新自动选中显示
+        PV_PATH = null; var pvb = $('#pvBody'); if (pvb) pvb.innerHTML = '';   // 巡站页预览指向的图可能已删，一并清掉
+        if (SEL) selectAccount(SEL);
+        pollLogs();
+      })
+      .catch(function () {
+        BM_ARM = false; bmBtnReset();
+        $('#bmSum').textContent = '后端未连接，删除失败';
+      });
+  }
+  $('#batchModal').onclick = function (e) { if (e.target === this) closeBatchModal(); };
+  function smAll(v) { $$('#smList input[type=checkbox]').forEach(function (c) { c.checked = v; }); }
+  function smOk() {
+    var cbs = $$('#smList input[type=checkbox]');
+    if (SEL === '__ALL__') {
+      var byAcc = {};
+      cbs.forEach(function (c) {
+        var acc = c.dataset.acc; if (!acc) return;
+        if (!byAcc[acc]) byAcc[acc] = [];
+        if (c.checked) byAcc[acc].push(c.value);
+      });
+      Object.keys(byAcc).forEach(function (acc) { SITE_SEL[acc] = byAcc[acc]; });
+    } else {
+      SITE_SEL[SEL] = cbs.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    }
+    updateBarSub(CUR_DEVS);
+    closeSiteModal();
+  }
+  // ---------- 账号管理页 ----------
+  function renderAccountsView() {
+    var p = $('#accountsPanel');
+    p.innerHTML = '<div class="ahead"><div><h3 class="ptit">账号管理</h3>'
+      + '<p class="psub">新增 / 编辑 / 停用 / 删除都在这里操作；也可以点「编辑账号表格」直接改 CSV。'
+      + '本工具理论支持且只支持由有人云平台分发的账号。</p></div>'
+      + '<div class="acts"><button class="btn pri" onclick="accFormShow()">＋ 新增账号</button>'
+      + '<button class="btn" onclick="editAccounts()">编辑账号表格</button></div></div>'
+      + '<div id="accForm" style="display:none" class="card accform">'
+      + '<div id="accFormTitle" style="font-weight:600;font-size:13px;margin:0 0 8px">新增账号</div>'
+      + '<div class="fgrid">'
+      + '<label>名称<input id="afName" placeholder="如：公司名称"></label>'
+      + '<label>账号<input id="afAcc" placeholder="手机号"></label>'
+      + '<label>密码<input id="afPwd" type="password" placeholder="平台登录密码"></label>'
+      + '<label>平台ID<input id="afPlat" placeholder="默认 W3rfV"></label>'
+      + '<label>站点过滤<input id="afKw" placeholder="可选，多个用、分隔"></label>'
+      + '</div><div class="fbtns"><button class="btn pri" onclick="accSave()">保存</button>'
+      + '<button class="btn" onclick="accFormHide()">取消</button></div></div>'
+      + '<div id="accMgrList"><div class="empty">加载中…</div></div>';
+    api('/api/accountsall').then(function (j) {
+      var box = $('#accMgrList'); box.innerHTML = '';
+      if (!j || !j.ok) { box.innerHTML = '<div class="empty">' + esc((j && j.msg) || '加载失败') + '</div>'; return; }
+      ACC_ALL = j.accounts || [];
+      if (!(j.accounts || []).length) { box.innerHTML = '<div class="empty">还没有账号，点右上角「＋ 新增账号」</div>'; return; }
+      j.accounts.forEach(function (a, i) {
+        var c = document.createElement('div'); c.className = 'card' + (a.enabled ? '' : ' off');
+        c.innerHTML = '<div style="display:flex;gap:10px;align-items:center;min-width:0">'
+          + '<div class="av" style="background:' + (a.enabled ? avColor(i) : '#C4C9D2') + '">' + esc(ini(a.name)) + '</div>'
+          + '<div><div class="nm">' + esc(a.name) + (a.enabled ? '' : '（已停用）') + '</div>'
+          + '<div class="sub">' + esc(a.account) + ' · 平台 ' + esc(a.platform)
+          + (a.kw ? ' · 过滤: ' + esc(a.kw) : '') + (a.has_pwd ? '' : ' · 缺密码') + '</div></div></div>';
+        var acts = document.createElement('div');
+        acts.className = 'acts';
+        var btn = document.createElement('button'); btn.className = 'btn';
+        btn.textContent = a.enabled ? '停用' : '启用';
+        btn.onclick = function () {
+          api('/api/toggleaccount', { method: 'POST', body: JSON.stringify({ name: a.name, enabled: !a.enabled }) })
+            .then(function (r) {
+              if (r && r.ok) { renderAccountsView(); loadAccounts(); }
+              else alert((r && r.msg) || '操作失败');
+            });
+        };
+        var be = document.createElement('button'); be.className = 'btn';
+        be.textContent = '编辑';
+        be.onclick = function () { accFormShow(a.name); };
+        var bd = document.createElement('button'); bd.className = 'btn';
+        bd.textContent = '删除';
+        bd.onclick = function () {
+          if (!confirm('确定删除账号「' + a.name + '」？\n\n'
+            + '会从账号表里移除它，之后的巡检和截图都不再包含这个账号。\n'
+            + '（账号密码等数据不可恢复；历史批次里的截图不受影响）')) return;
+          api('/api/delaccount', { method: 'POST', body: JSON.stringify({ name: a.name }) })
+            .then(function (r) {
+              if (r && r.ok) {
+                if (SEL === a.name) { SEL = null; }
+                renderAccountsView(); loadAccounts();
+              } else alert((r && r.msg) || '删除失败');
+            });
+        };
+        acts.appendChild(btn); acts.appendChild(be); acts.appendChild(bd);
+        c.appendChild(acts); box.appendChild(c);
+      });
+    });
+  }
+  var ACC_ALL = [], ACC_EDIT = null;   // 账号管理页全量列表 / 正在编辑的原名称（null=新增）
+  function accFormShow(name) {
+    ACC_EDIT = name || null;
+    var a = ACC_EDIT ? ACC_ALL.filter(function (x) { return x.name === ACC_EDIT; })[0] : null;
+    var t = $('#accFormTitle');
+    if (t) t.textContent = ACC_EDIT ? ('编辑账号 · ' + ACC_EDIT) : '新增账号';
+    $('#afName').value = a ? a.name : '';
+    $('#afAcc').value = a ? a.account : '';
+    $('#afPwd').value = '';
+    $('#afPwd').placeholder = ACC_EDIT ? '留空则不改密码' : '平台登录密码';
+    $('#afPlat').value = a ? a.platform : '';
+    $('#afKw').value = a ? (a.kw || '') : '';
+    $('#accForm').style.display = 'block';
+    var nm = $('#afName'); if (nm) nm.focus();
+  }
+  function accFormHide() { ACC_EDIT = null; $('#accForm').style.display = 'none'; }
+  function accSave() {
+    var b = { name: $('#afName').value, account: $('#afAcc').value,
+              password: $('#afPwd').value, platform: $('#afPlat').value, kw: $('#afKw').value };
+    var url = '/api/addaccount';
+    if (ACC_EDIT) { url = '/api/editaccount'; b.name_old = ACC_EDIT; }
+    api(url, { method: 'POST', body: JSON.stringify(b) }).then(function (r) {
+      if (r && r.ok) { ACC_EDIT = null; accFormHide(); renderAccountsView(); loadAccounts(); }
+      else alert((r && r.msg) || '保存失败');
+    });
+  }
+  function editAccounts() { if (!DEMO) api('/api/open?p=accounts.csv'); }
+  function pickStations() { openSiteModal(); }   // 顶部「选择站点」按钮
+  function quitApp() { if (!DEMO) api('/api/quit', { method: 'POST' }); }
+
+  // ---------- 演示数据（无后端时回落到设计稿样式）----------
+  var DEMO_DEVS = {};
+  function loadDemo() {
+    DEMO = true;
+    ACCOUNTS = [
+      {name: '示例账号', account: '13800000000', platform: 'W3rfV', enabled: true,
+       last: {total: 39, online: 1, stale: 12, offline: 26, run_at: '2026-09-29T20:06:00'}},
+      {name: '线路甲', account: '13800000001', platform: 'W3rfV', enabled: true,
+       last: {total: 10, online: 3, stale: 1, offline: 6, run_at: '2026-09-29T20:06:00'}},
+      {name: '线路乙', account: '13800000002', platform: 'W3rfV', enabled: true,
+       last: {total: 8, online: 0, stale: 2, offline: 6, run_at: '2026-09-29T20:06:00'}}
+    ];
+    DEMO_DEVS['示例账号'] = [
+      {no: 'YS2508077-2', name: '1号站点（YS2508077-2）', status: '在线', age: '0 分钟前',
+       rows: [['供水温度', '45.2 ℃'], ['回水温度', '38.6 ℃'], ['系统压力', '0.42 MPa'],
+              ['水箱液位', '1.80 m'], ['1# 循环泵', '运行'], ['2# 循环泵', '停止']]},
+      {no: 'YS2508077-1', name: '2号站点（YS2508077-1）', status: '数据陈旧', age: '3.2 天前'},
+      {no: 'YS2508077-4', name: '3号站点（YS2508077-4）', status: '离线', age: '无数据'},
+      {no: 'YS2410033-10', name: '4号站点 YS2410033-10', status: '离线', age: '无数据'},
+      {no: 'YS2410033-14', name: '5号站点 YS2410033-14', status: '离线', age: '无数据'},
+      {no: 'YS2410033-25', name: '6号站点 YS2410033-25', status: '数据陈旧', age: '4.1 天前'},
+      {no: 'YS2507076-7', name: '7号站点（YS2507076-7)', status: '数据陈旧', age: '6.8 天前'},
+      {no: 'YS2507076-8', name: '8号站点（YS2507076-8)', status: '数据陈旧', age: '6.8 天前'},
+      {no: 'YS2507076-2', name: '9号站点（YS2507076-2)', status: '离线', age: '无数据'},
+      {no: 'YS2507076-5', name: '10号站点（YS2507076-5)', status: '离线', age: '无数据'}
+    ];
+    DEMO_DEVS['线路甲'] = [
+      {no: 'YS2410033-14', name: '5号站点 YS2410033-14', status: '在线', age: '1 分钟前'},
+      {no: 'YS2410033-25', name: '6号站点 YS2410033-25', status: '在线', age: '2 分钟前'},
+      {no: 'YS2410033-27', name: '11号站点 YS2410033-27', status: '在线', age: '5 分钟前'},
+      {no: 'YS2410033-11', name: '12号站点 YS2410033-11', status: '数据陈旧', age: '2.6 天前'},
+      {no: 'YS2410033-09', name: '13号站点 YS2410033-09', status: '离线', age: '无数据'}
+    ];
+    DEMO_DEVS['线路乙'] = [
+      {no: 'YS2507076-2', name: '9号站点（YS2507076-2)', status: '离线', age: '无数据'},
+      {no: 'YS2507076-5', name: '10号站点（YS2507076-5)', status: '离线', age: '无数据'},
+      {no: 'YS2507076-7', name: '7号站点（YS2507076-7)', status: '数据陈旧', age: '6.8 天前'},
+      {no: 'YS2507076-8', name: '8号站点（YS2507076-8)', status: '数据陈旧', age: '6.8 天前'}
+    ];
+    renderAccounts();
+    $('#stRight').textContent = '上次批次 2026-09-29 20:06 · 57 张 · 在线 4';
+    selectAccount('__ALL__');
+    $('#devFoot').textContent = '共 39 台 · 在线 1 / 陈旧 12 / 离线 26';
+    appendLogs([
+      '20:06:01 [worker1] (1/39) 在线 1号站点（YS2508077-2）',
+      '20:06:02 [worker2] (1/39) 离线(无数据) 3号站点（YS2508077-4）',
+      '20:06:02 [worker3] (1/39) 离线(数据陈旧) 2号站点（YS2508077-1）',
+      '20:06:03 [worker4] (1/39) 离线(无数据) 4号站点 YS2410033-10',
+      '20:06:04 [worker1] (2/39) 离线(无数据) 5号站点 YS2410033-14',
+      '20:06:05 [worker2] (2/39) 离线(数据陈旧) 6号站点 YS2410033-25'
+    ]);
+  }
+
+  // ---------- 启动 ----------
+  // HTML 里大量内联 onclick="fn()"，必须把这些函数暴露到全局，否则点击直接 ReferenceError。
+  window.editAccounts = editAccounts;
+  window.accFormShow = accFormShow;
+  window.accFormHide = accFormHide;
+  window.accSave = accSave;
+  window.pickStations = pickStations;
+  window.pauseRun = pauseRun;
+  window.startRun = startRun;
+  window.openShot = openShot;
+  window.openShotDir = openShotDir;
+  window.quitApp = quitApp;
+  window.closeSiteModal = closeSiteModal;
+  window.openBatchModal = openBatchModal;
+  window.closeBatchModal = closeBatchModal;
+  window.bmAll = bmAll;
+  window.bmDelete = bmDelete;
+  window.smAll = smAll;
+  window.smOk = smOk;
+  window.wFilter = wFilter;
+  window.watchScan = watchScan;
+  window.watchToggle = watchToggle;
+  window.watchInterval = watchInterval;
+  window.ruleAdd = ruleAdd;
+  window.ruleDel = ruleDel;
+  window.ruleSave = ruleSave;
+  window.locateIdx = locateIdx;
+  window.wTab = wTab;
+  window.onDevQ = onDevQ;
+  window.onAccQ = onAccQ;      // 左侧「搜索账号」输入框（内联 oninput 只认 window 上的名字）
+  window.watchToggleBtn = watchToggleBtn;
+  window.histReload = histReload;
+  window.histToggleI = histToggleI;
+  window.fetchOne = fetchOne;
+  window.setView = setView;
+  // 新增函数也要显式导出（整个 UI 脚本在闭包里，内联 onclick 只能看到 window 上的名字）
+  // 漏导出的后果是「点了没反应」：内联 onclick 抛 ReferenceError，页面不报错、控制台一片安静。
+  // 改完新函数务必在这里补一行。
+  window.setNotifyMode = setNotifyMode;
+  window.notifyTest = notifyTest;
+  // 导出 paintHealth：通道状态文案有三层分支（可用/不可用/未投递），
+  // 导出后可在自动化测试里直接喂不同入参、断言用户实际看到的文本，
+  // 不用去构造闭包外的 RULES/WATCH。
+  window.paintHealth = paintHealth;
+  window.setRepeatMode = setRepeatMode;
+  window.setRepeatGap = setRepeatGap;
+  window.setNotifyBuiltin = setNotifyBuiltin;
+  window.histSave = histSave;
+  // 规则行内联事件的全局桥接：RULES/RU_DIRTY 在闭包内，内联代码摸不到
+  window.__ruleField = function (i, k, v) {
+    if (!RULES || !RULES.rules || !RULES.rules[i]) return;
+    RULES.rules[i][k] = v;
+    RU_DIRTY = true;
+    var m = $('#alMsg');
+    if (m) m.textContent = '改动未保存，点右上角「保存规则」生效';
+  };
+  window.__ruleStale = function (v) {
+    if (!RULES) return;
+    RULES.stale_minutes = Math.max(1, Math.min(1440, parseInt(v, 10) || 30));
+    RU_DIRTY = true;
+    var m = $('#alMsg');
+    if (m) m.textContent = '改动未保存，点右上角「保存规则」生效';
+  };
+  window.__ruleRepaint = function () { paintRules(); };
+
+  // 监控状态轮询（每 8 秒一次本机请求，开销可忽略）
+  setTimeout(wPoll, 1500);
+  setInterval(wPoll, 8000);
+  // 运行日志常驻轮询：打开软件就拉，不等「开始截图」
+  setTimeout(pollLogs, 800);
+  setInterval(pollLogs, 2000);
+
+  fit();
+  paintSortHead();   // 表头先把当前排序列的箭头画出来（默认「站名 ▲」或上次记住的那种）
+  loadAccounts();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+# 运行时 / 依赖
+node_modules/
+python/
+__pycache__/
+*.pyc
+
+# 日志
+*.log
+main-log.txt
+launch-log.txt
+
+# 运行时状态
+窗口位置.json
+关闭方式.json
+
+# 账号、缓存与业务数据（绝不入库）
+accounts.csv.bak
+登录缓存/*
+!登录缓存/.gitkeep
+历史数据/
+监控记录/
+截图/
+*_截图/
+*.zip
+
+# 系统
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+{
+  "name": "usrcloud-patrol",
+  "version": "1.0.0",
+  "description": "有人云巡站客户端（Electron 壳 + Python 后端）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.5.1"
+  }
+}
