@@ -85,7 +85,11 @@
   .drow{height:44px;flex:none;border-bottom:1px solid #F4F5F7;cursor:pointer}
   .drow:hover{background:#F8FAFE}
   .drow.on{background:#EDF3FE}
-  .dname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:10px}
+  .dname{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:26px}
+  /* 设备行上的「复制站点名称」：悬停才出现，预留了 26px 内边距，不会盖住名称、不改变对齐 */
+  .cpname{position:absolute;right:2px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid #E4E8EE;border-radius:6px;background:#fff;color:#8A9099;cursor:pointer;padding:0}
+  .drow:hover .cpname{display:inline-flex}
+  .cpname:hover{color:#2F6BFF;border-color:#C9D6F5;background:#F4F7FD}
   .st{display:flex;align-items:center;font-size:12px}
   .dot{width:7px;height:7px;border-radius:50%;margin-right:6px;flex:none}
   .age{font-size:11.5px;color:#8A9099;text-align:right}
@@ -115,6 +119,19 @@
   .wbtn{height:24px;padding:0 8px;border:1px solid #C9D2E3;background:#F4F7FD;color:#1F4BB8;border-radius:6px;font-size:11.5px;cursor:pointer;white-space:nowrap;flex:none}
   .wbtn:hover{background:#E8EFFC}
   .wunit{color:#9CA3AF;font-size:11.5px;flex:none}
+  /* 单个变量刷新（每行最右的小圆箭头；只读点也能点） */
+  .wrf{width:20px;height:20px;flex:none;border:none;background:none;color:#B0B5BD;cursor:pointer;padding:0;border-radius:5px;display:inline-flex;align-items:center;justify-content:center}
+  .wrf:hover{background:#EEF3FD;color:#2F6BFF}
+  .wrf.spin svg{animation:rfspin .8s linear infinite}
+  @keyframes rfspin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+  .r.flash{background:#F2F8F4}
+  .r.flash .rv{color:#12A150}
+  /* 站名后的复制按钮（实时卡标题） */
+  .cpnm{margin-left:5px;vertical-align:1px;border:none;background:none;color:#B0B5BD;cursor:pointer;padding:0}
+  .cpnm:hover{color:#2F6BFF}
+  /* 轻提示：写值结果 / 复制成功等（原来 toast 只写 console，看不见） */
+  .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:rgba(26,29,33,.92);color:#fff;font-size:12.5px;line-height:1.6;padding:8px 14px;border-radius:8px;z-index:90;opacity:0;pointer-events:none;transition:opacity .18s;max-width:72vw;text-align:center;box-shadow:0 6px 20px rgba(20,30,50,.18)}
+  .toast.on{opacity:1}
   .shot{width:100%;border-radius:10px;display:block;background:#fff}
   .phold{width:300px;padding:40px 18px;text-align:center;color:#9CA3AF;font-size:12.5px;line-height:1.8;border:1px dashed #E2E5EA;border-radius:14px}
 
@@ -271,6 +288,15 @@
   .pthint{margin-top:3px;font-size:11px;line-height:1.4;word-break:break-all}
   .pthint.ok{color:#1D9E75}
   .pthint.bad{color:#C77700}
+  /* 规则页输入框的候选下拉（自定义，不依赖原生 datalist —— 那个只在输入时才弹，
+     点一下输入框不给看，用户会以为"没有下拉框"）。类名都带 .rcombo 前缀，避免与既有类撞名。 */
+  .rcombo{position:fixed;z-index:95;background:#fff;border:1px solid #E1E4E9;border-radius:8px;
+    box-shadow:0 8px 24px rgba(20,30,50,.14);max-height:216px;overflow-y:auto;padding:4px;
+    font-size:12px;display:none}
+  .rcombo .item{padding:5px 8px;border-radius:6px;color:#3A4048;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rcombo .item:hover,.rcombo .item.on{background:#EEF3FD;color:#1F4BB8}
+  .rcombo .none{padding:6px 8px;color:#A3A9B2}
   .rtab input[type=text],.rtab input[type=number],.rtab select{
     width:100%;height:27px;border:1px solid #E1E4E9;border-radius:6px;padding:0 6px;font-size:11.5px;
     font-family:inherit;color:#3A4048;background:#fff;box-sizing:border-box}
@@ -552,7 +578,7 @@
           <div id="alRuleBox"><div class="empty">加载中…</div></div>
           <div class="arow" style="margin-top:10px">
             <button class="btn" onclick="ruleAdd()">＋ 添加规则</button>
-            <span class="hint">删除：每行最右侧的 ✕；停用：去掉行首勾选。账号 / 设备名直接选，变量名可选可填（支持 * 通配）。条件选「区间内」时阈值填两个数，判定为<b>大于左值且小于右值</b>（两端都不含）。设备读回来的只有纯数字，无需填单位。所有改动需点右上角「保存规则」才生效。</span>
+            <span class="hint">删除：每行最右侧的 ✕；停用：去掉行首勾选。<b>账号、设备名、变量名三个都可以填，也可以从下拉里挑</b>（支持 * 通配，只写几个字也算，如「线路甲」「4号站点」「出水温度」；输入框下方会实时显示能匹配到几个）。条件选「区间内」时阈值填两个数，判定为<b>大于左值且小于右值</b>（两端都不含）。设备读回来的只有纯数字，无需填单位。所有改动需点右上角「保存规则」才生效。</span>
           </div>
           <div id="alDiagBox" style="margin-top:12px"></div>
         </div>
@@ -587,7 +613,8 @@
       <div class="row"><label>往期批次</label><span class="hint" style="margin-left:0">每个批次跑完都会保留，程序不会自动删除；需要腾空间请到巡站页点「清理往期」勾选删除。</span></div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.0（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.1（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>v1.1 新增</label><span>控制下发（写数值 / 开关，二次确认）· 点系统通知跳转到对应站点 · 单个变量刷新 · 复制站点名称 · 右键菜单（含输入框剪切/复制/粘贴/全选）· 设备列表排序与账号搜索</span></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
   </main>
@@ -667,7 +694,11 @@
     </div>
   </div>
 
-</div></div>
+</div>
+
+<!-- 轻提示（复制成功 / 刷新结果 / 写值结果）：放在 .win 外面，避免被主容器的缩放影响 -->
+<div class="toast" id="toast"></div>
+</div>
 
 <script>
 (function () {
@@ -691,7 +722,55 @@
     return fetch(p, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}))
       .then(function (r) { return r.json(); }).catch(function () { return { ok: false, msg: '离线' }; });
   }
-  function toast(msg) { try { console.log(msg); } catch (e) {} }
+  var TOAST_T = null;
+  function toast(msg) {
+    try { console.log(msg); } catch (e) {}
+    try {
+      var el = $('#toast');
+      if (!el) return;
+      el.textContent = String(msg == null ? '' : msg);
+      el.classList.add('on');
+      if (TOAST_T) clearTimeout(TOAST_T);
+      TOAST_T = setTimeout(function () { el.classList.remove('on'); }, 2400);
+    } catch (e) {}
+  }
+  // 复制文本：优先用剪贴板 API，失败退回 textarea + execCommand（Electron 里都可用）
+  function legacyCopy(txt) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-1000px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, txt.length);
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
+  function copyText(txt, tip) {
+    var s = String(txt == null ? '' : txt);
+    if (!s) { toast('没有可复制的内容'); return; }
+    var done = function () { toast((tip || '已复制') + '：' + s); };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(s).then(done, function () {
+          if (legacyCopy(s)) done(); else alert('复制失败，请手动复制：\n' + s);
+        });
+        return;
+      }
+    } catch (e) { /* 落到下面的兜底 */ }
+    if (legacyCopy(s)) done(); else alert('复制失败，请手动复制：\n' + s);
+  }
+  var ICON_RF = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.2v4.6h-4.6"/></svg>';
+  var ICON_CP = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/>'
+    + '<path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
 
   // ---------- 自适应（画布严格等于窗口可用区）----------
   // 之前只算宽度、高度在 CSS 里写死 760px、宽度还有 maxW 上限 → 窗口放大后画布不动，只多出灰边。
@@ -1016,9 +1095,15 @@
       var flag = (live && d.anoms && d.anoms.length)
         ? '<i class="wflag" title="' + esc(d.anoms.map(function (x) { return x.name; }).join('、')) + '"></i>'
         : '';
-      row.innerHTML = '<div class="dname">' + flag + esc(d.name || d.no || '') + '</div>'
+      row.innerHTML = '<div class="dname">' + flag + esc(d.name || d.no || '')
+        + '<button class="cpname" title="复制站点名称">' + ICON_CP + '</button></div>'
         + '<div class="st"><i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st) + '</div>'
         + '<div class="age">' + esc(d.age || '无数据') + '</div>';
+      var cpb = row.querySelector('.cpname');       // 悬停出现：复制站点名称（不触发选中）
+      if (cpb) cpb.onclick = function (ev) {
+        ev.stopPropagation();
+        copyText(d.name || d.no || '', '已复制站点名称');
+      };
       row.onclick = function () {
         $$('.drow').forEach(function (r) { r.classList.remove('on'); });
         row.classList.add('on');
@@ -1191,6 +1276,9 @@
     LIVE_VALS = j.vals || [];
     var rows = (j.vals || []).map(function (r, i) {
       var v = (r.v == null || r.v === '') ? '—' : String(r.v);
+      // 每行最右的「单独刷新」：向设备发一次只读的主动采集，拿这台设备这一路的当前值
+      var rf = '<button class="wrf" data-i="' + i + '" title="刷新这个变量（让设备立刻上报当前值）">'
+        + ICON_RF + '</button>';
       if (r.rw === 1) {       // 控制点：0/1 给一键开关，其余给输入框 + 写入
         var ctl;
         if (v === '0' || v === '1') {
@@ -1207,10 +1295,10 @@
               + '<button class="wbtn" data-i="' + i + '">写入</button>';
         }
         return '<div class="r rw1"><span class="rk">' + esc(r.name) + '</span>'
-             + '<span class="rctl">' + ctl + '</span></div>';
+             + '<span class="rctl">' + ctl + rf + '</span></div>';
       }
-      return '<div class="r"><span class="rk">' + esc(r.name) + '</span><span class="rv">'
-        + esc(v) + '</span></div>';
+      return '<div class="r"><span class="rk">' + esc(r.name) + '</span>'
+        + '<span class="rctl"><span class="rv">' + esc(v) + '</span>' + rf + '</span></div>';
     }).join('');
     setPvBodyHtml('<div class="ph"><div class="phtop">'
       + '<span class="badge ' + cls + '">' + esc(j.status) + '</span>'
@@ -1218,7 +1306,8 @@
       + '<button class="btn" style="margin-left:auto;height:24px;padding:0 10px;font-size:11px"'
       + (j.manual ? ' disabled' : '') + ' onclick="fetchOne()">'
       + (j.manual ? '已获取' : '立即获取') + '</button></div>'
-      + '<div class="phname">' + esc(PV_LIVE.name) + '</div>'
+      + '<div class="phname">' + esc(PV_LIVE.name)
+      + '<button class="cpnm" title="复制站点名称">' + ICON_CP + '</button></div>'
       + '<div class="phmeta">实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量'
       + (an ? ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>' : '') + '</div>'
       + '<div class="rows">' + (rows || '<div class="r"><span class="rk">—</span><span class="rv">无变量</span></div>') + '</div></div>');
@@ -1230,6 +1319,65 @@
     $$('#pvBodyW .wbtn').forEach(function (b) {
       b.onclick = function () { doWrite(parseInt(b.dataset.i, 10)); };
     });
+    $$('#pvBodyW .wrf').forEach(function (b) {          // 单个变量刷新
+      b.onclick = function () { refreshPoint(parseInt(b.dataset.i, 10)); };
+    });
+    var cpb = $('#pvBodyW .cpnm');                     // 复制站点名称（卡片标题）
+    if (cpb) cpb.onclick = function () { copyText(PV_LIVE && PV_LIVE.name, '已复制站点名称'); };
+  }
+  // 单个变量刷新：向设备发一次**只读**的「主动采集」，让设备立刻把这一路的当前值报上来。
+  // 只改这一行的显示（不整块重画），所以不会冲掉滚动位置和正在输入的值。
+  var REFRESHING = {};
+  function refreshPoint(i) {
+    var r = LIVE_VALS[i];
+    if (!r || !PV_LIVE) return;
+    if (!r.id) { toast('这个变量没取到点位 ID，无法单独刷新'); return; }
+    var acc = PV_LIVE.acc, no = PV_LIVE.no;
+    var key = no + '|' + r.name;
+    if (REFRESHING[key]) return;
+    REFRESHING[key] = 1;
+    var btn = document.querySelector('#pvBodyW .wrf[data-i="' + i + '"]');
+    if (btn) btn.classList.add('spin');
+    var fin = function () { delete REFRESHING[key]; if (btn) btn.classList.remove('spin'); };
+    api('/api/pointquery', { method: 'POST', body: JSON.stringify({
+      account: acc, no: no,
+      points: [{ name: r.name, dataPointId: r.id, identifier: r.ident }]
+    }) }).then(function (j) {
+      fin();
+      if (!PV_LIVE || PV_LIVE.no !== no) return;
+      var got = (j && j.vals && j.vals[0]) || null;
+      if (j && j.ok && got) {
+        updateLiveValue(got.name || r.name, got.v);
+        toast('已刷新 ' + (got.name || r.name) + ' = ' + got.v);
+      } else {
+        toast((j && j.msg) || '刷新失败');
+      }
+    }).catch(function (e) {
+      fin();
+      toast('刷新失败：' + ((e && e.message) || '后端未响应'));
+    });
+  }
+  function updateLiveValue(name, v) {
+    var sv = (v == null || v === '') ? '—' : String(v);
+    for (var i = 0; i < LIVE_VALS.length; i++) {
+      if (LIVE_VALS[i] && LIVE_VALS[i].name === name) LIVE_VALS[i].v = sv;
+    }
+    var rows = $$('#pvBodyW .r');
+    for (var k = 0; k < rows.length; k++) {
+      var nm = rows[k].querySelector('.rk');
+      if (!nm || nm.textContent !== name) continue;
+      var inp = rows[k].querySelector('.wnum');
+      var vv = rows[k].querySelector('.rv');
+      if (inp) {                                  // 数值型可写点：值在输入框里
+        var mm = /^([-+]?\d+(?:\.\d+)?)\s*(.*)$/.exec(sv);
+        inp.value = mm ? mm[1] : (/^[-—]+$/.test(sv) ? '' : sv);
+      } else if (vv) {
+        vv.textContent = sv;
+      }
+      rows[k].classList.add('flash');
+      (function (el) { setTimeout(function () { el.classList.remove('flash'); }, 900); })(rows[k]);
+      break;
+    }
   }
   // 写入 / 开关：先弹「设备 · 变量 · 当前值 → 新值」确认框（用户要求的保存前额外提醒），确认后才下发
   var WRITING = false;        // 防连点：一次只发一条
@@ -1567,37 +1715,28 @@
     var ops = ['<', '>', '<=', '>=', '=', '!=', 'between'];
     var opText = { 'between': '区间内' };
     var accts = (WC && WC.accounts) || [];
-    // 下拉选项构造：首项为「全部」(*)，当前值不在清单里时也保留，避免丢数据
-    function optHtml(val, list, allLabel) {
-      var out = ['<option value="*"' + (val === '*' ? ' selected' : '') + '>' + allLabel + '</option>'];
-      var seen = {};
-      (list || []).forEach(function (n) {
-        if (seen[n]) return;
-        seen[n] = 1;
-        out.push('<option value="' + esc(n) + '"' + (val === n ? ' selected' : '') + '>' + esc(n) + '</option>');
-      });
-      if (val && val !== '*' && !seen[val])
-        out.push('<option value="' + esc(val) + '" selected>' + esc(val) + '</option>');
-      return out.join('');
-    }
+    // 账号候选（全表共用一个 datalist；账号就那几条，不用按行/按设备过滤）
+    var acctDl = '<datalist id="alAccts">' + accts.map(function (n) {
+      return '<option value="' + esc(n) + '"></option>';
+    }).join('') + '</datalist>';
+    var devDls = [];                       // 每行一个设备名候选表（随本行账号过滤）
     var body = rs.map(function (r, i) {
-      // 设备名下拉随本行账号过滤；账号为 * 时展示全部设备
       var accPat = r.account || '*';
-      var devList = [];
-      if (WC) {
-        WC.devices.forEach(function (d) {
-          if (accPat === '*' || d.acc === accPat) devList.push(d.name);
-        });
-      }
+      var devList = __ruleDevsFor(accPat);
+      devDls.push('<datalist id="alDevs' + i + '">' + devList.map(function (n) {
+        return '<option value="' + esc(n) + '"></option>';
+      }).join('') + '</datalist>');
       return '<tr class="' + (r.enabled === false ? 'off' : '') + '">'
         + '<td class="cen"><input type="checkbox" ' + (r.enabled !== false ? 'checked' : '')
         + ' onchange="__ruleField(' + i + ',\'enabled\',this.checked);'
         + 'this.closest(\'tr\').className=this.checked?\'\':\'off\'"></td>'
         + '<td><input type="text" value="' + esc(r.name || '') + '" oninput="__ruleField(' + i + ',\'name\',this.value)"></td>'
-        + '<td><select onchange="__ruleField(' + i + ',\'account\',this.value);__ruleRepaint()">'
-        + optHtml(accPat, accts, '全部账号 (*)') + '</select></td>'
-        + '<td><select onchange="__ruleField(' + i + ',\'device\',this.value)">'
-        + optHtml(r.device || '*', devList, '全部设备 (*)') + '</select></td>'
+        + '<td><input type="text" list="alAccts" value="' + esc(accPat) + '"'
+        + ' title="可从下拉选择，也可只填几个字（如 线路甲）或写 * 表示全部账号"'
+        + ' oninput="__ruleField(' + i + ',\'account\',this.value);__ruleAcctHint(' + i + ')"></td>'
+        + '<td><input type="text" list="alDevs' + i + '" value="' + esc(r.device || '*') + '"'
+        + ' title="可从下拉选择，也可只填几个字（如 4号站点、5号站点 都能识别）；* = 全部设备"'
+        + ' oninput="__ruleField(' + i + ',\'device\',this.value);__ruleDevHint(' + i + ')"></td>'
         + '<td><input type="text" list="alPts" value="' + esc(r.point || '*') + '" title="可从下拉选择，也可只填几个字，如 供水温度、进水温度 都能识别" oninput="__ruleField(' + i + ',\'point\',this.value);__rulePointHint(' + i + ')"></td>'
         + '<td><select onchange="__ruleField(' + i + ',\'op\',this.value);__ruleRepaint()">'
         + ops.map(function (o) {
@@ -1624,11 +1763,12 @@
       + '<col style="width:4%"></colgroup>'
       + '<thead><tr><th class="cen">启用</th><th>规则名</th><th>账号</th><th>设备名</th>'
       + '<th>变量名</th><th>条件</th><th>阈值</th><th>级别</th><th></th>'
-      + '</tr></thead><tbody>' + body + '</tbody></table>';
+      + '</tr></thead><tbody>' + body + '</tbody></table>'
+      + acctDl + devDls.join('');   // 候选表（datalist 放哪都行）
     // ⚠ 必须在 innerHTML 赋值**之后**再刷提示条：
     // __rulePointHint 是按行号去 DOM 里找 tr 的，innerHTML 还没写时DOM 是空的，
     // 插进去的行找不到，提示条会全部丢失（页面看不出任何异常，只是提示不显示）。
-    rs.forEach(function (r, i) { __rulePointHint(i); });
+    rs.forEach(function (r, i) { __rulePointHint(i); __ruleDevHint(i); __ruleAcctHint(i); });
     paintRuleDiag();
   }
 
@@ -1653,6 +1793,122 @@
     if (core.length < 2) return false;// 单字不宽松，避免错配
     return core.indexOf(s) >= 0 || s.indexOf(core) >= 0;
   }
+  // ---- 规则页三个字段（账号 / 设备名 / 变量名）的候选下拉 ----
+  // 数据源就是各自的 <datalist>（后端 catalog 给的清单），这里只负责"点一下能看见"。
+  // 原生 datalist 在 Chromium 里只在输入时才弹，所以自己做了一个：聚焦/点击 → 列出候选，
+  // 输入 → 按同一套匹配规则过滤，点候选/回车 → 填进去，Esc 或点别处 → 收起。
+  var RC_EL = null, RC_INPUT = null, RC_ITEMS = [], RC_IDX = -1;
+  function rcBox() {
+    if (!RC_EL) {
+      RC_EL = document.createElement('div');
+      RC_EL.className = 'rcombo';
+      document.body.appendChild(RC_EL);
+    }
+    return RC_EL;
+  }
+  function rcDataList(el) {
+    var dl = document.getElementById(el.getAttribute('list') || '');
+    if (!dl) return [];
+    return $$('option', dl).map(function (o) { return o.value; });
+  }
+  // 候选表按需就地重建。为什么需要：规则页可能在 catalog 拉回来**之前**就渲染好了
+  // （首屏点进异常提醒页时更常见），那一刻三张候选表都是空的，而且之后没有任何东西
+  // 会去补它们 —— 表现就是「点开输入框什么都没有」。点开输入框这一刻重建一次最稳。
+  function rcRefreshFor(el) {
+    var l = (el.getAttribute && el.getAttribute('list')) || '';
+    try {
+      if (l === 'alAccts') { __ruleAcctDatalist(); }
+      else if (l === 'alPts') { __rulePointDatalist(); }
+      else if (l.indexOf('alDevs') === 0) {
+        var rs = (RULES && RULES.rules) || [];
+        var i = parseInt(l.slice(6), 10);
+        if (rs[i]) __ruleDevDatalist(i, rs[i].account || '*');
+      }
+    } catch (e) { /* ignore */ }
+  }
+  function rcIsRuleInput(el) {
+    return !!(el && el.tagName === 'INPUT' && el.getAttribute && el.getAttribute('list')
+      && el.closest && el.closest('#alRuleBox'));
+  }
+  function rcClose() {
+    RC_INPUT = null; RC_ITEMS = []; RC_IDX = -1;
+    if (RC_EL) RC_EL.style.display = 'none';
+  }
+  function rcRender() {
+    var box = rcBox();
+    if (!RC_INPUT || !RC_ITEMS.length) { box.style.display = 'none'; return; }
+    if (!document.body.contains(RC_INPUT)) { rcClose(); return; }   // 表格被重画过：别浮在原地
+    box.innerHTML = RC_ITEMS.slice(0, 200).map(function (v, i) {
+      return '<div class="item' + (i === RC_IDX ? ' on' : '') + '" data-v="' + esc(v) + '"'
+        + ' title="' + esc(v) + '">' + esc(v) + '</div>';
+    }).join('');
+    var r = RC_INPUT.getBoundingClientRect();
+    box.style.left = Math.round(r.left) + 'px';
+    box.style.top = Math.round(r.bottom + 2) + 'px';
+    box.style.minWidth = Math.round(r.width) + 'px';
+    box.style.maxWidth = '520px';
+    box.style.display = 'block';
+    var on = box.querySelector('.item.on');
+    if (on && on.scrollIntoView) { try { on.scrollIntoView({ block: 'nearest' }); } catch (e) { } }
+  }
+  function rcOpen(el) {
+    if (!rcIsRuleInput(el)) return;
+    rcRefreshFor(el);                              // 先按最新清单重建这张候选表
+    var all = rcDataList(el);
+    if (!all.length) { rcClose(); return; }        // 没有候选就不弹（别装作有）
+    var pat = String(el.value || '').trim();
+    RC_INPUT = el;
+    RC_IDX = -1;
+    RC_ITEMS = (pat && pat !== '*')
+      ? all.filter(function (n) { return __ruleMatchOne(pat, n); })
+      : all;
+    if (!RC_ITEMS.length) { rcClose(); return; }
+    rcRender();
+  }
+  function rcPick(v) {
+    var el = RC_INPUT;
+    if (!el) return;
+    el.value = v;
+    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
+    try { el.focus(); } catch (e) { }
+    rcClose();
+  }
+  document.addEventListener('focusin', function (ev) {
+    if (rcIsRuleInput(ev.target)) rcOpen(ev.target); else rcClose();
+  });
+  document.addEventListener('input', function (ev) {
+    if (ev.target === RC_INPUT) rcOpen(ev.target);
+  });
+  document.addEventListener('mousedown', function (ev) {
+    // 用 mousedown 抢在失焦之前：先 preventDefault 保焦点，再取值
+    var it = ev.target && ev.target.closest ? ev.target.closest('.rcombo .item') : null;
+    if (it) { ev.preventDefault(); rcPick(it.getAttribute('data-v')); }
+  });
+  document.addEventListener('click', function (ev) {
+    var t = ev.target;
+    if (t === RC_INPUT) return;
+    if (t && t.closest && t.closest('.rcombo')) return;
+    rcClose();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (!RC_INPUT || !RC_EL || RC_EL.style.display === 'none') return;
+    if (ev.key === 'Escape') { rcClose(); return; }
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      RC_IDX += (ev.key === 'ArrowDown' ? 1 : -1);
+      if (RC_IDX < 0) RC_IDX = RC_ITEMS.length - 1;
+      if (RC_IDX >= RC_ITEMS.length) RC_IDX = 0;
+      rcRender();
+      return;
+    }
+    if (ev.key === 'Enter' && RC_IDX >= 0) { ev.preventDefault(); rcPick(RC_ITEMS[RC_IDX]); }
+  });
+  window.__rcOpen = rcOpen;      // 测试用
+  window.__rcItems = function () { return RC_ITEMS.slice(); };
+  // 页面滚动/窗口缩放后重新贴近输入框（规则表内滚是常事），表格被重画则直接收起
+  window.addEventListener('resize', function () { if (RC_INPUT) rcRender(); });
+  document.addEventListener('scroll', function () { if (RC_INPUT) rcRender(); }, true);
+
   window.__rulePointHint = function (i) {
     var rs = (RULES && RULES.rules) || [];
     var row = document.querySelector('#alRuleBox tbody tr:nth-child(' + (i + 1) + ')');
@@ -1685,6 +1941,128 @@
       d.innerHTML = '✕ 没匹配上，这批设备实际有：'
         + all.slice(0, 4).map(function (h) { return esc(h); }).join('、')
         + (all.length > 4 ? ' 等' : '');
+    }
+    cell.appendChild(d);
+  };
+
+  // 账号 / 变量名的候选表就地重建（同 __ruleDevDatalist 的思路：catalog 是异步到的，
+  // 规则页先渲染、清单后到，不在用的这一刻重建就点不出候选）。
+  function __ruleAcctDatalist() {
+    var dl = document.getElementById('alAccts');
+    if (!dl) return;
+    var accts = (WC && WC.accounts) || [];
+    dl.innerHTML = accts.map(function (n) {
+      return '<option value="' + esc(n) + '"></option>';
+    }).join('');
+  }
+  function __rulePointDatalist() {
+    var dl = document.getElementById('alPts');
+    if (!dl) return;
+    var pts = (WC && WC.points) || [];
+    dl.innerHTML = pts.map(function (n) {
+      return '<option value="' + esc(n) + '"></option>';
+    }).join('');
+  }
+  // ---- 设备名即时识别提示（与变量名同一套匹配逻辑，后端 _wmatch 也一样）----
+  // 设备名以前是个死下拉框：只能从"已加载的设备"里挑，想写不在清单里的站、
+  // 或只写几个字（如「4号站点」）都没法写。现在跟变量名一样可填可挑。
+  // 某个账号范围下有哪些设备——设备名的候选表与提示都用它，保证两边一致。
+  // ⚠ 账号列允许写通配/半截名字（如 "*有人云"、"线路甲"），所以这里必须用 __ruleMatchOne
+  // 判断「设备属于不属于这个账号」，不能用 d.acc === accPat：
+  // 用精确相等的话，账号一旦写成通配，候选和提示就都是空的（下拉点不出来）。
+  function __ruleDevsFor(accPat) {
+    var out = [];
+    if (WC) {
+      WC.devices.forEach(function (d) {
+        if (__ruleMatchOne(accPat, d.acc) && out.indexOf(d.name) < 0) out.push(d.name);
+      });
+    }
+    return out;
+  }
+  // 就地重建某一行的设备候选表（账号改了要跟着换，且不能整表重画——会丢输入焦点）
+  function __ruleDevDatalist(i, accPat) {
+    var dl = document.getElementById('alDevs' + i);
+    if (!dl) return;
+    if (accPat == null) {
+      var rs = (RULES && RULES.rules) || [];
+      accPat = (rs[i] && rs[i].account) || '*';
+    }
+    dl.innerHTML = __ruleDevsFor(accPat).map(function (n) {
+      return '<option value="' + esc(n) + '"></option>';
+    }).join('');
+  }
+  // ---- 账号即时识别提示（与设备名/变量名同一套匹配逻辑，后端 _wmatch 也一样）----
+  // 账号以前也是死下拉框：规则里想写"线路甲"这种半截名字、或临时加个新账号，
+  // 都只能从清单里挑。现在三个字段（账号 / 设备名 / 变量名）统一成"可填可挑 + 实时提示"。
+  window.__ruleAcctHint = function (i) {
+    var rs = (RULES && RULES.rules) || [];
+    var row = document.querySelector('#alRuleBox tbody tr:nth-child(' + (i + 1) + ')');
+    if (!rs[i] || !row) return;
+    var cell = null, tds = row.children;
+    for (var k = 0; k < tds.length; k++) {
+      if (tds[k].querySelector('input[list="alAccts"]')) { cell = tds[k]; break; }
+    }
+    if (!cell) return;
+    var old = cell.querySelector('.pthint');
+    if (old) old.remove();
+    __ruleAcctDatalist();          // 账号候选表也按最新清单重建
+    // 账号一变，本行的设备候选与设备提示也要跟着变
+    __ruleDevDatalist(i, rs[i].account || '*');
+    __ruleDevHint(i);
+    var pat = String(rs[i].account || '*');
+    if (pat === '*') return;                      // 全部账号不用提示
+    var all = (WC && WC.accounts) || [];
+    if (!all.length) return;
+    var hits = all.filter(function (n) { return __ruleMatchOne(pat, n); });
+    var d = document.createElement('div');
+    d.className = 'pthint';
+    if (hits.length) {
+      d.classList.add('ok');
+      d.innerHTML = '✓ 匹配到 ' + hits.length + ' 个账号：' + hits.slice(0, 3).map(esc).join('、');
+      d.title = hits.join('\n');
+    } else {
+      d.classList.add('bad');
+      d.innerHTML = '✕ 没匹配上，现有账号：'
+        + all.slice(0, 3).map(esc).join('、') + (all.length > 3 ? ' 等' : '');
+      d.title = all.join('\n');
+    }
+    cell.appendChild(d);
+  };
+  window.__ruleDevHint = function (i) {
+    var rs = (RULES && RULES.rules) || [];
+    var row = document.querySelector('#alRuleBox tbody tr:nth-child(' + (i + 1) + ')');
+    if (!rs[i] || !row) return;
+    var cell = null, tds = row.children;
+    for (var k = 0; k < tds.length; k++) {
+      if (tds[k].querySelector('input[list^="alDevs"]')) { cell = tds[k]; break; }
+    }
+    if (!cell) return;
+    var old = cell.querySelector('.pthint');
+    if (old) old.remove();
+    var pat = String(rs[i].device || '*');
+    if (pat === '*') return;                      // 全部设备不用提示
+    var accPat = rs[i].account || '*';
+    var all = __ruleDevsFor(accPat);
+    if (!all.length) return;
+    var hits = all.filter(function (n) { return __ruleMatchOne(pat, n); });
+    var d = document.createElement('div');
+    d.className = 'pthint';
+    if (hits.length) {
+      d.classList.add('ok');
+      // 设备名很长，列又窄：只显示条数 + 第一个（太长就截断），完整清单放 tooltip，
+      // 否则提示条会把整行撑到三四行高，表格没法看。
+      var first = hits[0];
+      var short = first.length > 16 ? (first.slice(0, 16) + '…') : first;
+      d.innerHTML = '✓ 匹配到 ' + hits.length + ' 台：' + esc(short) + (hits.length > 1 ? ' 等' : '');
+      d.title = '匹配到 ' + hits.length + ' 台：' + hits.join('\n');
+    } else {
+      d.classList.add('bad');
+      d.innerHTML = '✕ 没匹配上，本行账号下有：'
+        + all.slice(0, 2).map(function (h) {
+            return esc(h.length > 16 ? (h.slice(0, 16) + '…') : h);
+          }).join('、')
+        + (all.length > 2 ? ' 等' : '');
+      d.title = '本行账号下的设备：' + all.join('\n');
     }
     cell.appendChild(d);
   };
@@ -2820,6 +3198,52 @@
   window.histToggleI = histToggleI;
   window.fetchOne = fetchOne;
   window.setView = setView;
+  // ---- 右键菜单（Electron 主进程 context-menu 事件里按坐标回调这两个）----
+  // 为什么走"坐标命中测试"：右键事件在主进程里只有 x/y，contextIsolation 下拿不到 DOM，
+  // 所以由主进程 executeJavaScript 调回这里，用 elementFromPoint 判断点到了哪台设备。
+  window.__hittest = function (x, y) {
+    try {
+      var el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      var row = el.closest ? el.closest('.drow') : null;
+      if (row) {
+        var nmEl = row.querySelector('.dname');
+        var name = (nmEl ? nmEl.textContent : '').trim();
+        var no = row.dataset.no || '';
+        var acc = '';
+        for (var i = 0; i < CUR_DEVS.length; i++) {
+          if (CUR_DEVS[i] && CUR_DEVS[i].no === no) { acc = CUR_DEVS[i]._acc || ''; break; }
+        }
+        return { kind: 'row', name: name, no: no, acc: acc,
+                 view: document.body.getAttribute('data-view') || '' };
+      }
+      var ph = el.closest ? el.closest('.ph') : null;      // 实时数据卡
+      if (ph) {
+        var pn = ph.querySelector('.phname');
+        return { kind: 'card', name: pn ? pn.textContent.trim() : '',
+                 no: (PV_LIVE && PV_LIVE.no) || '', acc: (PV_LIVE && PV_LIVE.acc) || '',
+                 view: document.body.getAttribute('data-view') || '' };
+      }
+      return null;
+    } catch (e) { return null; }
+  };
+  window.__menuAction = function (kind, val, view) {
+    try {
+      if (kind === 'refresh') {                // 刷新这台设备的实时数据
+        if (document.body.getAttribute('data-view') !== 'watch') setView('watch');
+        var pick = function () {
+          var r = document.querySelector('#devListW .drow[data-no="' + val + '"]');
+          if (!r) { toast('当前设备列表里没找到这台设备'); return; }
+          r.click();
+          setTimeout(function () { try { fetchOne(); } catch (e) {} }, 600);
+        };
+        setTimeout(pick, 300);                 // 给切页/渲染留一点时间
+        return;
+      }
+    } catch (e) {
+      toast('操作失败：' + ((e && e.message) || e));
+    }
+  };
   // 新增函数也要显式导出（整个 UI 脚本在闭包里，内联 onclick 只能看到 window 上的名字）
   // 漏导出的后果是「点了没反应」：内联 onclick 抛 ReferenceError，页面不报错、控制台一片安静。
   // 改完新函数务必在这里补一行。

@@ -2,7 +2,7 @@
 // 职责：拉起同目录的 python 后端（webui_server.py，无头模式），
 // 后端自动分配端口并写入临时文件，本进程轮询读取后让真 Chromium 加载界面。
 // 关闭窗口时杀掉 python 子进程，不留后台残留。
-const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage, clipboard } = require('electron');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -623,6 +623,79 @@ function askCloseThen(win) {
   }
 }
 
+// ---- 右键菜单 --------------------------------------------------------------
+// 为什么需要：应用菜单被设成 null（去掉 File/Edit 菜单栏），Electron 也就不再给
+// <input> 提供系统右键菜单 → 所有输入框都点不出「剪切/复制/粘贴/全选」。
+// 这里自己做一份：① 输入框 → 标准编辑项（按 editFlags 决定可用性）；
+// ② 站点名/设备行 → 只保留两项：复制站点名称、刷新这台设备的实时数据
+//    （用户 2026-10-15 明确要求：其他的都去掉，菜单要短）。
+const MENU_JS_HITTEST = 'window.__hittest ? window.__hittest(%d, %d) : null';
+
+function menuRun(win, kind, val, view) {
+  try {
+    win.webContents.executeJavaScript(
+      'window.__menuAction && window.__menuAction(' + JSON.stringify(kind) + ','
+      + JSON.stringify(val == null ? '' : val) + ',' + JSON.stringify(view || '') + ')');
+  } catch (e) { /* ignore */ }
+}
+
+function setupContextMenu(win) {
+  win.webContents.on('context-menu', (event, params) => {
+    const show = (info) => {
+      const items = [];
+      const f = params.editFlags || {};
+      const hasSel = !!(params.selectionText && params.selectionText.trim());
+      if (info && info.name) {
+        const nm = info.name;
+        items.push({ label: '复制站点名称', click: () => clipboard.writeText(nm) });
+        items.push({ type: 'separator' });
+        items.push({ label: '刷新这台设备的实时数据', click: () => menuRun(win, 'refresh', info.no || nm, info.view) });
+      }
+      if (params.isEditable) {
+        if (items.length) items.push({ type: 'separator' });
+        items.push({ label: '剪切', role: 'cut', enabled: !!f.canCut });
+        items.push({ label: '复制', role: 'copy', enabled: !!(f.canCopy || hasSel) });
+        items.push({ label: '粘贴', role: 'paste', enabled: !!f.canPaste });
+        items.push({ type: 'separator' });
+        items.push({ label: '全选', role: 'selectAll', enabled: !!f.canSelectAll });
+      } else if (hasSel && !(info && info.name)) {
+        // 页面里有残留选区时（用户刚拖选过文本），Electron 会把 selectionText 带进来。
+        // 但这不意味着想在设备行上看到「复制/全选」—— 用户要求站点那条菜单只有两项，
+        // 所以这里排掉已命中设备行/实时卡的情形。
+        items.push({ label: '复制', role: 'copy' });
+        items.push({ label: '全选', role: 'selectAll' });
+      }
+      if (!items.length) return;      // 空白处不弹（保持原样）
+      try { Menu.buildFromTemplate(items).popup({ window: win }); } catch (e) { /* ignore */ }
+    };
+    if (params.isEditable) return show(null);        // 输入框：直接给编辑菜单
+    win.webContents.executeJavaScript(
+      MENU_JS_HITTEST.replace('%d', Math.round(params.x)).replace('%d', Math.round(params.y)))
+      .then(show).catch(() => show(null));
+  });
+}
+
+// ---- 键盘兜底：Ctrl+C / X / V / A / Z / Y ----
+// 没有应用菜单栏时，部分机器上输入框的 Ctrl+C/V 会失效；这里直接转发给 webContents，
+// 只在组合键确实成功转发后才 preventDefault（避免反而把默认行为干掉）。
+function setupEditKeys(win) {
+  const wc = win.webContents;
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const mod = input.control || input.meta;
+    if (!mod || input.alt || input.shift) return;
+    const k = String(input.key || '').toLowerCase();
+    try {
+      if (k === 'c') { wc.copy(); event.preventDefault(); }
+      else if (k === 'x') { wc.cut(); event.preventDefault(); }
+      else if (k === 'v') { wc.paste(); event.preventDefault(); }
+      else if (k === 'a') { wc.selectAll(); event.preventDefault(); }
+      else if (k === 'z') { wc.undo(); event.preventDefault(); }
+      else if (k === 'y') { wc.redo(); event.preventDefault(); }
+    } catch (e) { /* ignore */ }
+  });
+}
+
 function createWindow(port) {
   const bd = loadBounds();
   // 把「检测到了几块屏、各自多大、窗口落在哪块屏、最终开多大」全部打出来，
@@ -657,6 +730,9 @@ function createWindow(port) {
     },
   });
   win.once('ready-to-show', () => { log('ready-to-show → show()'); win.show(); });
+
+  setupContextMenu(win);      // 右键菜单：输入框的剪切/复制/粘贴/全选 + 站点名的快捷操作
+  setupEditKeys(win);         // 没有应用菜单栏，Ctrl+C/V/X/A 兜底转发
 
   // ---- 记住窗口大小/位置：拖动/缩放停下 0.7 秒后写盘，关闭时再兜一次 ----
   // 关键：系统会在请求尺寸之外加上边框并取整，导致“读到的大小”总比“请求的大小”多几像素。

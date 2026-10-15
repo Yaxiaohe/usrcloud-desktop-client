@@ -167,22 +167,29 @@ def _publish_and_wait(token, uid, dev_no, payload_obj, match_ids, timeout, acc='
             'replies': replies, 'error': None}
 
 
-def probe_read(token, uid, dev_no, point, timeout=8, acc=''):
-    """通道自检：发一条「主动采集」（只读，不改设备任何数据），等设备回报。
-    point: {'dataPointId': relId, 'identifier': 'variableN'}
-    返回 {'ok', 'msg', 'replies'}"""
-    if not point:
-        return {'ok': False, 'msg': '缺少变量点'}
+def probe_read(token, uid, dev_no, points, timeout=8, acc=''):
+    """单点/多点刷新：发「主动采集」，让设备立刻上报这些变量的当前值。
+    **只读**——不改设备任何数据、不写任何值。
+    points: [{'dataPointId': relId, 'identifier': 'variableN'}, ...]（也接受单个 dict）
+    返回 {'ok', 'msg', 'confirmed', 'vals': {relId: 值}}"""
+    if isinstance(points, dict):
+        points = [points]
+    points = [p for p in (points or []) if p]
+    if not points:
+        return {'ok': False, 'msg': '缺少变量点', 'vals': {}}
+    match = {str(p.get('dataPointId')): None for p in points}
     r = _publish_and_wait(token, uid, dev_no,
-                          {'version': 0, 'queryDataPoint': [point]},
-                          {str(point.get('dataPointId')): None}, timeout, acc)
+                          {'version': 0, 'queryDataPoint': points}, match, timeout, acc)
     if r.get('error'):
-        return {'ok': False, 'msg': r['error'], 'replies': r.get('replies') or []}
-    if r['replies']:
-        return {'ok': True, 'confirmed': True, 'replies': r['replies'],
-                'msg': '通道正常（设备已回报）'}
-    return {'ok': True, 'confirmed': False, 'replies': [],
-            'msg': '已发出读取请求，但 {} 秒内没收到设备回报'.format(timeout)}
+        return {'ok': False, 'msg': r['error'], 'vals': {}, 'replies': r.get('replies') or []}
+    vals = {}
+    for x in (r.get('replies') or []):
+        vals[str(x['dataPointId'])] = x['value']
+    if vals:
+        return {'ok': True, 'confirmed': True, 'vals': vals, 'replies': r['replies'],
+                'msg': '已刷新（设备回报 {} 个变量）'.format(len(vals))}
+    return {'ok': True, 'confirmed': False, 'vals': {}, 'replies': [],
+            'msg': '已向设备发出读取请求，但 {} 秒内没收到回报（可再点一次）'.format(timeout)}
 
 
 def write_points(token, uid, dev_no, points, timeout=10, acc=''):

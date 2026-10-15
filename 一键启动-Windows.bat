@@ -4,7 +4,7 @@ cd /d "%~dp0"
 title USRCloud Patrol Client
 
 rem ============================================================
-rem  有人云巡站客户端 (Electron 启动器，无需 Node.js/npm)
+rem  USRCloud Patrol Client  (Electron launcher)
 rem  This launcher does NOT need Node.js / npm.
 rem  It runs the bundled Electron runtime directly.
 rem ============================================================
@@ -13,7 +13,7 @@ set "EL=%~dp0node_modules\electron\dist\electron.exe"
 set "LOGF=%~dp0launch-log.txt"
 
 echo ============================================
-echo   有人云巡站客户端
+echo   USRCloud Patrol Client
 echo ============================================
 echo.
 

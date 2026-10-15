@@ -381,7 +381,7 @@ def _hist_trim(path, days):
 def _acct_dir(batch, aname):
     """批次目录下某账号的子目录。
     子目录名是 run_usrcloud 的 safe_name(账号名)（去掉空白和 ?（）():: 等），
-    账号名里带空格时（如「线路甲 包银」）目录名会是「线路甲包银」，不能直接拼串，
+    账号名里带空格时（如「线路甲 二组」）目录名会是「线路甲二组」，不能直接拼串，
     否则新加的带空格账号会整批显示"未巡/无数据/暂无截图"。
     依次尝试：原名 / 清洗后同名 -> 各目录 巡站报告.json 里的 account_name。"""
     if not batch or not aname:
@@ -812,6 +812,30 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'ok': False,
                                        'msg': '获取失败: {}'.format(str(e)[:150])})
                 return self._json({'ok': True, 'dev': d})
+            if name == 'pointquery':
+                # 单变量刷新：让设备主动上报某些变量的当前值（只读，不写任何值，故无需二次确认）
+                if WATCHER is None:
+                    return self._err('监控引擎未启用')
+                acc = str(body.get('account') or '')
+                no = str(body.get('no') or '')
+                pts = body.get('points') or []
+                if not acc or not no or not pts:
+                    return self._err('缺少 account / no / points 参数')
+                norm = []
+                for p in pts:
+                    try:
+                        apid = int(p.get('dataPointId'))
+                    except (TypeError, ValueError):
+                        return self._json({'ok': False, 'msg': '变量 ID 非法'})
+                    norm.append({'name': str(p.get('name') or ''),
+                                 'dataPointId': apid,
+                                 'identifier': str(p.get('identifier') or '')})
+                try:
+                    r = WATCHER.point_query(acc, no, norm)
+                except Exception as e:
+                    return self._json({'ok': False,
+                                       'msg': '刷新失败: {}'.format(str(e)[:150])})
+                return self._json(r)
             if name == 'control':
                 # 控制下发（写值 / 开关）：必须带 confirm=true（前端二次确认后才发）
                 if WATCHER is None:

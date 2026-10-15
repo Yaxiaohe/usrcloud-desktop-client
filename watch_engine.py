@@ -882,14 +882,26 @@ class WatchEngine:
             del self._notify_events[:-200]
 
     def catalog(self):
-        """监控设备目录（账号/设备名/变量名清单），供规则下拉菜单防错输。"""
+        """监控设备目录（账号/设备名/变量名清单），供规则编辑时的候选与实时匹配。
+
+        ⚠ 变量名以前只从「已巡检到的变量值」收集：设备离线 / 数据陈旧时一个都收不到，
+        规则页的下拉与「匹配到 N 个」提示就全是空的（用户实际反馈过）。
+        现在补两条来源：
+          ① 已巡到的设备与变量值（原有）
+          ② **平台变量点定义**（_point_defs，1 小时缓存）——每个账号挑最多 2 台设备取样，
+             同一套模板下变量名通用，因此不必逐台拉
+        ③ 设备清单：还没巡检过时也先按账号拉一次（_get_devices 有 TTL 缓存），
+           否则"设备名"候选在首轮巡检前也是空的
+        """
         accs, devs, pts = [], [], set()
+        cfgs = []
         try:                       # 账号名先从配置取（首轮巡检前也有）
-            for c in self._accounts():
+            cfgs = self._accounts()
+            for c in cfgs:
                 if c['name'] not in accs:
                     accs.append(c['name'])
         except Exception:
-            pass
+            cfgs = []
         with self._dev_lock:
             items = list(self._devices.values())
         for d in items:
@@ -897,9 +909,50 @@ class WatchEngine:
                 accs.append(d['acc'])
             devs.append({'acc': d['acc'], 'name': d['name'], 'no': d['no']})
             for p in (d.get('vals') or {}):
-                pts.add(p)
+                pts.add(str(p))
+
+        picks = {}                 # 账号 -> [设备号...]（取样用）
+        for d in devs:
+            lst = picks.setdefault(d['acc'], [])
+            if len(lst) < 2 and d.get('no'):
+                lst.append(d['no'])
+        for c in cfgs:
+            if c['name'] in picks:
+                continue
+            try:
+                tok, uid = R.ensure_login(c)
+                ds = self._get_devices(c, tok, uid)
+            except Exception:
+                continue
+            nos = []
+            for d in ds:
+                if not d.get('no'):
+                    continue
+                if not self._in_scope(c, d.get('name')):   # 只列巡检范围内（白名单）的设备
+                    continue
+                devs.append({'acc': c['name'], 'name': d.get('name'), 'no': d['no']})
+                if len(nos) < 2:
+                    nos.append(d['no'])
+            picks[c['name']] = nos
+        for acc, nos in picks.items():
+            try:
+                tok = self._token_for(acc)
+            except Exception:
+                continue
+            for no in nos[:2]:
+                try:
+                    for p in (self._point_defs(acc, no, tok) or []):
+                        nm = p.get('name')
+                        if nm:
+                            pts.add(str(nm))
+                except Exception:
+                    pass
+
+        uniq = {}
+        for d in devs:
+            uniq['{}|{}'.format(d['acc'], d['no'])] = d
         return {'ok': True, 'accounts': sorted(accs),
-                'devices': sorted(devs, key=lambda x: (x['acc'], x['name'])),
+                'devices': sorted(uniq.values(), key=lambda x: (x['acc'], x['name'])),
                 'points': sorted(pts)}
 
     def status(self):
@@ -1052,6 +1105,42 @@ class WatchEngine:
         返回 {'ok', 'msg', 'confirmed', 'topic', 'payload', 'replies'}"""
         tok, uid = self._tok_uid_for(acc)
         return usr_control.write_points(tok, uid, dev_no, points, acc=acc)
+
+    def point_query(self, acc, dev_no, points):
+        """单个变量刷新：让设备立刻上报这些变量的当前值（**只读**，不写任何值）。
+        points: [{'name': 变量名, 'dataPointId': relId, 'identifier': 'variableN'}, ...]
+        返回 {'ok', 'msg', 'confirmed', 'vals': [{'name','v'}]}
+        —— 拿到的值同时并进内存快照，这样 8 秒一轮的自动重画不会把它顶回旧值。"""
+        if not points:
+            raise ApiError('没有要刷新的变量')
+        tok, uid = self._tok_uid_for(acc)
+        by_id = {}
+        q = []
+        for p in points:
+            try:
+                pid = int(p.get('dataPointId'))
+            except (TypeError, ValueError):
+                continue
+            by_id[str(pid)] = p.get('name') or ''
+            q.append({'dataPointId': pid, 'identifier': p.get('identifier') or ''})
+        if not q:
+            raise ApiError('变量没有可用的点位 ID（可能没取到变量点定义）')
+        r = usr_control.probe_read(tok, uid, dev_no, q, timeout=8, acc=acc)
+        if not r.get('ok'):
+            return {'ok': False, 'msg': r.get('msg') or '刷新失败', 'vals': []}
+        out = []
+        st = self.device_state(acc, dev_no)
+        for pid, val in (r.get('vals') or {}).items():
+            nm = by_id.get(pid)
+            if not nm:
+                continue
+            out.append({'name': nm, 'v': val})
+            try:                              # 并进内存快照，避免自动重画时又变回旧值
+                if st is not None:
+                    st.setdefault('vals', {})[nm] = {'v': val, 't': '刚刚'}
+            except Exception:
+                pass
+        return {'ok': True, 'confirmed': bool(out), 'vals': out, 'msg': r.get('msg')}
 
     def live_vals_rw(self, acc, dev_no):
         """{变量名: {rw, id, ident}}——控制信息（懒加载：只在打开设备实时卡时拉点定义）。
