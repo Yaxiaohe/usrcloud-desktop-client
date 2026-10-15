@@ -106,6 +106,21 @@ spctl -a -vv "/Applications/有人云巡站客户端.app"
 3. Windows 版额外把 Python 运行时放到 `resources/app/python/`（主进程按 `python/python.exe` 找）
 4. 改 exe / app 名与图标即可分发
 
-## 六、许可
+## 六、版本号
+
+桌面端的版本号只有一处真源：`package.json` 的 `version` 字段。
+
+| 位置 | 字段 | 当前值 |
+| --- | --- | --- |
+| `package.json` | `version` | `1.0.0` |
+| Git tag / Release | 标签名 | `v1.0.0` |
+
+发版时保持两者一致即可。打包脚本读的是 `package.json`，
+Electron 生成的 exe / app 属性也取自这里。
+
+> 打包好的免安装版**不会**在界面上显示版本号（没有「关于」页），
+> 需要确认手上是哪个包，看 Release 页或 `package.json` 即可。
+
+## 七、许可
 
 MIT。第三方客户端，与有人云平台官方无关。
