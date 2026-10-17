@@ -1138,6 +1138,14 @@ class WatchEngine:
             try:                              # 并进内存快照，避免自动重画时又变回旧值
                 if st is not None:
                     st.setdefault('vals', {})[nm] = {'v': val, 't': '刚刚'}
+                    # 设备刚刚回报过，最新数据时间就是现在 —— 前端「数据时间」
+                    # 按 newest 实时算，不同步的话会一直停在上一轮巡检的旧时间上。
+                    nowstr = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    prev = st.get('newest')
+                    if not prev or prev == '-' or prev < nowstr:
+                        st['newest'] = nowstr
+                    st['age_min'] = 0.0
+                    st['ts'] = time.time()
             except Exception:
                 pass
         return {'ok': True, 'confirmed': bool(out), 'vals': out, 'msg': r.get('msg')}

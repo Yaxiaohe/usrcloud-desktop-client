@@ -1187,6 +1187,10 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 d['status'] = s['status']
                 d['age'] = R.fmt_age(s['age_min'])
+                # ★ 必须把绝对数据时间一起下发：age_min 是「巡检那一刻」的静态快照，
+                #   不会随时间走动（10:30 算出 1 分钟前，11:00 还写 1 分钟前）。
+                #   前端拿 newest 自己按当前时钟算，界面上的时间才会真实走动。
+                d['newest'] = s.get('newest')
                 d['live'] = True
                 d['watch_ts'] = s['ts']
                 d['points'] = s.get('n_points', 0)

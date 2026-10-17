@@ -642,10 +642,10 @@ def data_age_minutes(rows, now=None):
 
 
 def fmt_age(minutes):
-    """把分钟数转成易读的'距今'文本"""
+    """把分钟数转成易读的"距今"文本"""
     if minutes is None:
         return '无数据时间'
-    if minutes < 0:
+    if minutes < 1:
         return '刚刚'
     if minutes < 60:
         return '{:.0f} 分钟前'.format(minutes)

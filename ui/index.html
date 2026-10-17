@@ -613,7 +613,8 @@
       <div class="row"><label>往期批次</label><span class="hint" style="margin-left:0">每个批次跑完都会保留，程序不会自动删除；需要腾空间请到巡站页点「清理往期」勾选删除。</span></div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.1（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.2（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>v1.2 新增</label><span>数据时间改为按当前时钟实时走动（设备列表、实时卡片、监控页每 15 秒走一格，不再停在「巡检那一刻」的旧时间）· 在线/数据陈旧也按当前时钟复判，不会再出现「在线 11 小时前」这种自相矛盾</span></div>
       <div class="row"><label>v1.1 新增</label><span>控制下发（写数值 / 开关，二次确认）· 点系统通知跳转到对应站点 · 单个变量刷新 · 复制站点名称 · 右键菜单（含输入框剪切/复制/粘贴/全选）· 设备列表排序与账号搜索</span></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -930,24 +931,85 @@
      没有状态的（未巡）排在离线之后、在线之前。 */
   var ST_RANK = { '采集异常': 0, '数据陈旧': 1, '离线': 2, '未巡': 3, '在线': 4 };
   function stRank(d) {
-    var r = ST_RANK[d.status];
+    /* 用 shownStatus（按当前时钟复判过的），跟列表里显示的文案保持一致 ——
+       否则会出现「显示数据陈旧、排序却按在线排」的对不上。 */
+    var r = ST_RANK[shownStatus(d)];
     return r === undefined ? 3.5 : r;
   }
+  /* ============ 数据时间（"X 分钟前"）按当前时钟实时计算 ============
+     问题：后端 age_min 是**巡检那一刻**用 datetime.now() 减出来的静态快照，
+     之后不会变。巡检 30 分钟一轮、间隔又是 30 分钟，于是设备明明半小时没更新，
+     列表里还一直写"0 分钟前 / 1 分钟前"——看上去永远新鲜，实际早已陈旧。
+     修法：后端把**绝对数据时间** newest（'YYYY-MM-DD HH:MM:SS'，平台给的
+     设备上报时刻）一起下发，前端每秒按本地时钟现算，界面上的时间会真实走动。
+     这跟"巡站截图上的历史时间"是两码事，不受影响。 */
+  function parseTs(s) {
+    var m = String(s == null ? '' : s).match(
+      /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  }
+  /* 距今多少分钟；没有可信时间戳返回 null（调用方自行退化成静态文案） */
+  function ageFromNewest(newest) {
+    var t = parseTs(newest);
+    if (t == null) return null;
+    return (Date.now() - t) / 60000;
+  }
+  /* 分钟数 -> 文案。刻意跟后端 fmt_age 同口径（<1 分钟都算「刚刚」）。 */
+  function fmtAgeNum(m) {
+    if (m == null || isNaN(m)) return '无数据时间';
+    if (m < 1) return '刚刚';
+    if (m < 60) return Math.round(m) + ' 分钟前';
+    if (m < 1440) return (Math.round(m / 6) / 10) + ' 小时前';
+    return (Math.round(m / 144) / 10) + ' 天前';
+  }
+  /* 设备/卡片的"数据时间"文案：优先按 newest 实时算，没有 newest 才用后端给的静态文案 */
+  function ageText(d) {
+    var m = ageFromNewest(d && d.newest);
+    if (m != null) return fmtAgeNum(m);
+    return (d && d.age) ? String(d.age) : '无数据时间';
+  }
+  /* 显示用状态：后端 status 是巡检那一刻的判定，数据早就停更了它也不知道。
+     所以按当前时钟复判一次「在线 / 数据陈旧」——只在真的越过阈值时才改写文案，
+     不会把离线/采集异常误报成在线。阈值取监控规则里的 stale_minutes。 */
+  function shownStatus(d) {
+    var st = d.status || '未巡';
+    if (st !== '在线') return st;
+    var m = ageFromNewest(d && d.newest);
+    if (m == null) return st;
+    if (m > staleLimit()) return '数据陈旧';
+    return st;
+  }
+  /* 阈值现读不缓存：规则页改完保存要立刻生效，缓存住会读到旧值。
+     规则还没拉到时用后端同一个默认值 30（见 watch_engine._default_rules），
+     不能返回 null —— 那等于「不复判」，界面又会退回「在线 11 小时前」。 */
+  function staleLimit() {
+    var r = (WATCH && WATCH.rules) || RULES || null;
+    var v = r && parseInt(r.stale_minutes, 10);
+    return (isNaN(v) || v <= 0) ? 30 : v;
+  }
+  /* 导出给回归测试直接断言（闭包内的函数不挂 window 就在测试里够不着） */
+  window.__shownStatus = shownStatus;
+  window.__ageText = ageText;
   /* 「距今多少分钟」。
      后端 live 时给 age_min 最好；给不了就退回落盘报告里的文案
      （刚刚 / 2 分钟前 / 10.0 天前 / 无数据时间）。
      解析不出来的一律 Infinity 排最后 —— 一条脏数据不该把整个顺序搅乱。 */
   function ageMin(d) {
+    /* 优先用「绝对数据时间」自己现算：age_min 是巡检那一刻的静态快照，
+       巡检完 30 分钟也不会变，排序会整体失真。 */
+    var m = ageFromNewest(d && d.newest);
+    if (m != null) return m;
     if (typeof d.age_min === 'number') return d.age_min;
     var s = String(d.age == null ? '' : d.age).trim();
     if (!s) return Infinity;
     if (s === '刚刚') return 0;
-    var m = s.match(/([\d.]+)\s*(天|小时|分钟|秒)/);
-    if (!m) return Infinity;
-    var v = parseFloat(m[1]);
-    if (m[2] === '天') return v * 1440;
-    if (m[2] === '小时') return v * 60;
-    if (m[2] === '秒') return v / 60;
+    var m2 = s.match(/([\d.]+)\s*(天|小时|分钟|秒)/);
+    if (!m2) return Infinity;
+    var v = parseFloat(m2[1]);
+    if (m2[2] === '天') return v * 1440;
+    if (m2[2] === '小时') return v * 60;
+    if (m2[2] === '秒') return v / 60;
     return v;
   }
   var CMP = {
@@ -1091,14 +1153,15 @@
       var row = document.createElement('div');
       row.className = 'drow';
       row.dataset.no = d.no;          // 供「点击系统通知跳转到对应站点」按编号定位
-      var st = d.status || '未巡';   // 后端报告里有真实状态；没有则标「未巡」，不再误标「离线」
+      var st = shownStatus(d);   // 按当前时钟复判，别让「在线 11 小时前」这种自相矛盾出现
       var flag = (live && d.anoms && d.anoms.length)
         ? '<i class="wflag" title="' + esc(d.anoms.map(function (x) { return x.name; }).join('、')) + '"></i>'
         : '';
       row.innerHTML = '<div class="dname">' + flag + esc(d.name || d.no || '')
         + '<button class="cpname" title="复制站点名称">' + ICON_CP + '</button></div>'
         + '<div class="st"><i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st) + '</div>'
-        + '<div class="age">' + esc(d.age || '无数据') + '</div>';
+        + '<div class="age" data-nt="' + esc(d.newest || '') + '" title="'
+        + esc(d.newest || '无数据时间') + '">' + esc(ageText(d)) + '</div>';
       var cpb = row.querySelector('.cpname');       // 悬停出现：复制站点名称（不触发选中）
       if (cpb) cpb.onclick = function (ev) {
         ev.stopPropagation();
@@ -1267,7 +1330,8 @@
   function paintLive(j) {
     var body = $('#pvBodyW');
     if (!body || !PV_LIVE) return;
-    var cls = j.status === '在线' ? '' : (j.status === '数据陈旧' ? ' st' : ' of');
+    var stTxt = shownStatus(j);      // 同样按当前时钟复判，别出现「在线 11.1 小时前」
+    var cls = stTxt === '在线' ? '' : (stTxt === '数据陈旧' ? ' st' : ' of');
     var an = (j.anoms || []).map(function (x) { return x.name || x.rule_name || ''; })
       .filter(Boolean).join('、');
     // 记住用户已输入但没提交的值，重建后回填（否则每 8 秒自动刷新会把输入冲掉）
@@ -1301,8 +1365,10 @@
         + '<span class="rctl"><span class="rv">' + esc(v) + '</span>' + rf + '</span></div>';
     }).join('');
     setPvBodyHtml('<div class="ph"><div class="phtop">'
-      + '<span class="badge ' + cls + '">' + esc(j.status) + '</span>'
-      + '<span style="font-size:11px;color:#B0B5BD">数据 ' + esc(j.age || '—') + '</span>'
+      + '<span class="badge ' + cls + '">' + esc(stTxt) + '</span>'
+      + '<span class="lvage" data-nt="' + esc(j.newest || '') + '" title="'
+      + esc(j.newest || '无数据时间') + '" style="font-size:11px;color:#B0B5BD">数据 '
+      + esc(ageText(j)) + '</span>'
       + '<button class="btn" style="margin-left:auto;height:24px;padding:0 10px;font-size:11px"'
       + (j.manual ? ' disabled' : '') + ' onclick="fetchOne()">'
       + (j.manual ? '已获取' : '立即获取') + '</button></div>'
@@ -1474,8 +1540,8 @@
           var x = d.vals[k] || {};
           return { name: k, v: x.v, rw: x.rw || 0, id: x.id, ident: x.ident || '' };
         });
-        paintLive({ status: d.status, age: fmtAgeMin(d.age_min), vals: vals,
-                    n_points: d.n_points, anoms: d.anoms || [], manual: true });
+        paintLive({ status: d.status, age: fmtAgeMin(d.age_min), newest: d.newest,
+                    vals: vals, n_points: d.n_points, anoms: d.anoms || [], manual: true });
         refreshDevices();       // 列表状态同步更新
       })
       .catch(function () {
@@ -3280,6 +3346,19 @@
   // 运行日志常驻轮询：打开软件就拉，不等「开始截图」
   setTimeout(pollLogs, 800);
   setInterval(pollLogs, 2000);
+  /* 「数据时间」每 15 秒走一格。
+     只改已经带 data-nt 的元素文本，不重画列表 —— 重画会打断选中行、
+     滚动位置和正在输入的数值；这里一律只写 textContent。
+     没带 data-nt 的行（截图批次的历史时间）原样不动，那是另一个语义。 */
+  setInterval(function () {
+    $$('[data-nt]').forEach(function (el) {
+      var m = ageFromNewest(el.dataset.nt);
+      if (m == null) return;
+      var s = fmtAgeNum(m);
+      if (el.classList.contains('lvage')) s = '数据 ' + s;   // 实时卡片带「数据 」前缀
+      if (el.textContent !== s) el.textContent = s;
+    });
+  }, 15000);
 
   fit();
   paintSortHead();   // 表头先把当前排序列的箭头画出来（默认「站名 ▲」或上次记住的那种）
