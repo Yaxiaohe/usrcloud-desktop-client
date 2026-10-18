@@ -57,6 +57,7 @@
   .bdg.hot{background:#2F6BFF;color:#fff}
   .lfoot{border-top:1px solid #E9EBEF;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#7B828C}
   .lk{color:#2F6BFF;text-decoration:none;cursor:pointer}
+  .lk:hover{text-decoration:underline}
 
   /* 主区 */
   .main{flex:1;min-width:0;display:flex;flex-direction:column;background:#fff}
@@ -614,6 +615,7 @@
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
       <div class="row"><label>关于</label><span>有人云巡站客户端 v1.2（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label>v1.2 新增</label><span>数据时间改为按当前时钟实时走动（设备列表、实时卡片、监控页每 15 秒走一格，不再停在「巡检那一刻」的旧时间）· 在线/数据陈旧也按当前时钟复判，不会再出现「在线 11 小时前」这种自相矛盾</span></div>
       <div class="row"><label>v1.1 新增</label><span>控制下发（写数值 / 开关，二次确认）· 点系统通知跳转到对应站点 · 单个变量刷新 · 复制站点名称 · 右键菜单（含输入框剪切/复制/粘贴/全选）· 设备列表排序与账号搜索</span></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>

@@ -2,7 +2,7 @@
 // 职责：拉起同目录的 python 后端（webui_server.py，无头模式），
 // 后端自动分配端口并写入临时文件，本进程轮询读取后让真 Chromium 加载界面。
 // 关闭窗口时杀掉 python 子进程，不留后台残留。
-const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage, clipboard, shell } = require('electron');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -639,6 +639,23 @@ function menuRun(win, kind, val, view) {
   } catch (e) { /* ignore */ }
 }
 
+// ---- 外链打开 ----
+// 只放行 http/https。地址来自网页内容，其它 scheme（javascript: / file: / ms-msdt: 之类）
+// 交给系统等于把命令执行权交出去，Electron 官方也明确提示过这个风险。
+function openExternal(url) {
+  try {
+    const u = new URL(String(url || ''));
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      log('[外链] 已拒绝非 http(s) 地址: ' + u.protocol);
+      return;
+    }
+    shell.openExternal(u.toString());
+    log('[外链] 交给系统浏览器: ' + u.toString());
+  } catch (e) {
+    log('[外链] 打开失败: ' + String(e));
+  }
+}
+
 function setupContextMenu(win) {
   win.webContents.on('context-menu', (event, params) => {
     const show = (info) => {
@@ -730,6 +747,20 @@ function createWindow(port) {
     },
   });
   win.once('ready-to-show', () => { log('ready-to-show → show()'); win.show(); });
+
+  // ---- 外链一律交给系统浏览器 ----
+  // 网页跑在 Chromium 里，直接跳转会把这个窗口本身导航走：没有地址栏、退不回上一页，
+  // 用户只能关掉重开。所以 target=_blank / window.open 全都拦下，改用系统浏览器打开。
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openExternal(url);
+    return { action: 'deny' };
+  });
+  // 兜底：将来网页里若出现不带 target 的 <a>，也别让主窗口被导航走（自己的界面除外）
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url.indexOf('http://127.0.0.1:') === 0 || url.indexOf('file://') === 0) return;
+    e.preventDefault();
+    openExternal(url);
+  });
 
   setupContextMenu(win);      // 右键菜单：输入框的剪切/复制/粘贴/全选 + 站点名的快捷操作
   setupEditKeys(win);         // 没有应用菜单栏，Ctrl+C/V/X/A 兜底转发
