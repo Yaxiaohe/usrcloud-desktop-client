@@ -186,7 +186,12 @@
   #histBody{padding:8px;display:block}
   .hwrap{width:100%;height:100%;display:flex;flex-direction:column}
   .hchart{flex:1;min-height:0;position:relative}
-  #histCanvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #histCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+  /* 折线图悬浮提示：多天尺度上稀疏点对不上刻度，必须能逐个问出确切时间与数值 */
+  .htip{position:absolute;z-index:5;pointer-events:none;display:none;background:#fff;border:1px solid #E1E4E9;border-radius:6px;box-shadow:0 4px 14px rgba(16,24,40,.10);padding:5px 9px;font-size:11.5px;color:#3A4048;white-space:nowrap;line-height:1.5}
+  .htip b{font-weight:600}
+  .htip .htime{color:#8A9099;margin-left:7px}
+  .hmark{position:absolute;width:7px;height:7px;border-radius:50%;border:1.5px solid #fff;display:none;pointer-events:none;z-index:6;box-shadow:0 0 0 1px rgba(16,24,40,.18)}
 
   /* ===== 站点选择弹窗 ===== */
   .mwrap{position:fixed;inset:0;background:rgba(17,20,26,.42);display:none;align-items:center;justify-content:center;z-index:50}
@@ -598,7 +603,7 @@
     <section class="view" id="viewSettings"><div class="panel">
       <h3 class="ptit">设置</h3>
       <p class="psub">本机运行参数。</p>
-      <div class="row"><label>并发线程</label><input type="number" id="setWorkers" min="1" max="8" value="4"><span class="hint">1–8，建议 4</span></div>
+      <div class="row"><label>并发线程</label><input type="number" id="setWorkers" min="1" max="8" value="4"><span class="hint">1–8，建议 4；巡站截图与后台监控巡检都用这个数（运行日志和状态栏会显示实际生效值）</span></div>
       <div class="row" style="align-items:flex-start">
         <label style="padding-top:5px">关闭按钮</label>
         <div>
@@ -616,8 +621,6 @@
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
       <div class="row"><label>关于</label><span>有人云巡站客户端 v1.2（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
-      <div class="row"><label>v1.2 新增</label><span>数据时间改为按当前时钟实时走动（设备列表、实时卡片、监控页每 15 秒走一格，不再停在「巡检那一刻」的旧时间）· 在线/数据陈旧也按当前时钟复判，不会再出现「在线 11 小时前」这种自相矛盾</span></div>
-      <div class="row"><label>v1.1 新增</label><span>控制下发（写数值 / 开关，二次确认）· 点系统通知跳转到对应站点 · 单个变量刷新 · 复制站点名称 · 右键菜单（含输入框剪切/复制/粘贴/全选）· 设备列表排序与账号搜索</span></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
   </main>
@@ -1673,7 +1676,8 @@
     pollLogs(function (j) {
       var p = j.progress || { done: 0, total: 0 };
       if (j.running) {
-        $('#stLeft').textContent = '截图中 ' + p.done + '/' + p.total + (j.stage ? ' · ' + j.stage : '');
+        $('#stLeft').textContent = '截图中 ' + p.done + '/' + p.total
+          + (j.workers ? ' · ' + j.workers + ' 线程' : '') + (j.stage ? ' · ' + j.stage : '');
         $('#btnPause').disabled = false; $('#btnRun').disabled = true;
       } else if (j.done) {
         $('#stLeft').textContent = '完成 ' + j.done[0] + ' 张 · 在线 ' + j.done[1];
@@ -2661,10 +2665,26 @@
     }).join('');
     body.innerHTML = '<div class="hwrap"><div class="htop">' + chips + '</div>'
       + '<div class="hchart"><canvas id="histCanvas"></canvas></div></div>';
+    /* 标题栏标注「数据自 月-日 时:分」：本地记录还没攒够所选范围时，
+       曲线靠右显示，不标一句用户会以为图画错了 */
+    var dmin = Infinity;
+    names.forEach(function (n) {
+      (series[n] || []).forEach(function (p) { if (p[0] < dmin) dmin = p[0]; });
+    });
+    var hours2 = j.hours || 24, nowMs = Date.now();
+    var cover = '';
+    if (isFinite(dmin) && dmin > nowMs - hours2 * 3600000 + Math.max(3600000, hours2 * 90000)) {
+      cover = ' · 数据自 ' + fmtTs(dmin);
+    }
     $('#histMeta').textContent = (j.source === 'local' ? '本地记录 · ' : '')
       + '近 ' + (j.hours >= 48 ? Math.round(j.hours / 24) + ' 天' : j.hours + ' 小时')
-      + ' · ' + Math.min(HSEL.length, HSEL.length) + ' 条曲线';
+      + ' · ' + HSEL.length + ' 条曲线' + cover;
     drawHist(series);
+  }
+  var HIST_GEO = null;   // 悬浮提示用：所有已画点的屏幕坐标与原始值
+  function fmtTs(ms) {
+    var d = new Date(ms), p = function (n) { return ('0' + n).slice(-2); };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
   }
   function drawHist(series) {
     var cv = $('#histCanvas'); if (!cv) return;
@@ -2682,14 +2702,25 @@
         .filter(function (p) { return !isNaN(p[1]); });
     }).filter(function (s) { return s.length; });
     if (!data.length) return;
-    var mn = Infinity, mx = -Infinity, t0 = Infinity, t1 = -Infinity;
+    var mn = Infinity, mx = -Infinity, dmin = Infinity, dmax = -Infinity;
     data.forEach(function (s) { s.forEach(function (p) {
       if (p[1] < mn) mn = p[1]; if (p[1] > mx) mx = p[1];
-      if (p[0] < t0) t0 = p[0]; if (p[0] > t1) t1 = p[0];
+      if (p[0] < dmin) dmin = p[0]; if (p[0] > dmax) dmax = p[0];
     }); });
     if (mn === mx) { mn -= 1; mx += 1; }
     var pad = (mx - mn) * 0.08; mn -= pad; mx += pad;
-    if (t0 === t1) { t1 = t0 + 60000; }
+
+    /* ★ 横轴必须铺满「所选时间范围」，不能只框住有数据的那一小段。
+       旧写法拿数据的首尾当 t0/t1：选「近 7 天」而数据只覆盖 22 小时，
+       横轴就缩成小时尺度，几天的空白被压成几小时，稀疏点之间再拉直线，
+       看着像连续数据。现在一律按 now-hours ~ now 取范围，
+       没有数据的区域就空着 —— 空白本身也是信息（设备那会儿没上报）。 */
+    var hours = (HISTDATA && HISTDATA.hours) || parseInt($('#hRange').value, 10) || 24;
+    var nowMs = Date.now();
+    var t0 = nowMs - hours * 3600000;
+    var t1 = nowMs > dmax ? nowMs : dmax;    // 设备时钟可能超前：别把点切到画布外
+    if (dmin < t0) t0 = dmin;                // 有比范围起点更早的点也显示，不裁掉
+    if (t1 - t0 < 60000) t1 = t0 + 60000;
     var L = 52, R = 14, T = 12, B = 28;
     var X = function (t) { return L + (w - L - R) * (t - t0) / (t1 - t0); };
     var Y = function (v) { return T + (h - T - B) * (1 - (v - mn) / (mx - mn)); };
@@ -2701,30 +2732,150 @@
       var lb = Math.abs(vv) >= 1000 ? (Math.round(vv / 100) / 10) + 'k' : String(Math.round(vv * 10) / 10);
       ctx.textAlign = 'right'; ctx.fillText(lb, L - 6, yy + 3.5);
     }
-    var span = t1 - t0;
-    for (var i2 = 0; i2 <= 4; i2++) {
-      var tt = t0 + span * i2 / 4, d = new Date(tt);
-      var lab = span > 3 * 86400000
+    /* 横轴刻度跟着视野尺度走（四个档位都适用）：
+       一天以内按整点均分标 HH:MM；跨天按「本地零点」对齐标 MM-DD，
+       天数多就隔几天取一个（最多 9 个）。
+       旧逻辑是「跨度 > 3 天才标日期」，于是选「近 3 天」时横轴还是小时刻度，
+       一天的哪个时刻根本对不上 —— 这次一起修掉。 */
+    var span = t1 - t0, DAY = 86400000, ticks = [];
+    if (span >= 2 * DAY) {
+      var d0 = new Date(t0); d0.setHours(0, 0, 0, 0);
+      var days = Math.ceil(span / DAY), step = 1;
+      while (days / step > 9) step++;
+      for (var k = 0; k < 400; k++) {
+        var tt = d0.getTime() + k * step * DAY;
+        if (tt > t1) break;
+        if (tt >= t0) ticks.push(tt);
+      }
+      if (ticks.length < 2) ticks = [t0, t1];
+    } else {
+      for (var i2 = 0; i2 <= 4; i2++) ticks.push(t0 + span * i2 / 4);
+    }
+    ticks.forEach(function (tt, ix) {
+      var d = new Date(tt);
+      var lab = span >= 2 * DAY
         ? ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2)
         : ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-      ctx.textAlign = i2 === 0 ? 'left' : (i2 === 4 ? 'right' : 'center');
+      ctx.textAlign = ix === 0 ? 'left' : (ix === ticks.length - 1 ? 'right' : 'center');
       ctx.fillText(lab, X(tt), h - 8);
-    }
-    names.forEach(function (n) {
-      var s = (series[n] || []).map(function (p) { return [p[0], parseFloat(p[1])]; })
-        .filter(function (p) { return !isNaN(p[1]); });
-      if (s.length < 2) return;
-      ctx.strokeStyle = HCOLORS[(HNAMES.indexOf(n) >= 0 ? HNAMES.indexOf(n) : 0) % HCOLORS.length];
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      var stride = Math.max(1, Math.floor(s.length / (w * 2)));
-      for (var i3 = 0; i3 < s.length; i3 += stride) {
-        if (i3 === 0) ctx.moveTo(X(s[i3][0]), Y(s[i3][1]));
-        else ctx.lineTo(X(s[i3][0]), Y(s[i3][1]));
-      }
-      ctx.lineTo(X(s[s.length - 1][0]), Y(s[s.length - 1][1]));
-      ctx.stroke();
     });
+    /* 断不断线，看证据，不看间隔大小。
+       本地落盘和云端平台都按「值没变就不记」瘦身，单看一个变量的缺口根本分不清
+       「值没变」和「设备离线」；2026-10-18 那版按间隔阈值断，把一台 24 小时
+       被采 307 次的设备的出水温度撕成 4 截，10:44 那个点两边全断、孤零零
+       变成一个光点——折线图就要有线。现在的判据（缺口 (a,b)）：
+         1) 缺口不超过心跳窗口 hb（本地=巡检周期+60 分钟）→ 正常节奏，连；
+         2) 去掉两端 10 分钟（同一轮巡检各变量的平台时刻差几分钟，别拿它当证据）
+            后设备还有记录 → 值没变而已，连；
+         3) 程序当时在跑（别的设备有记录）而这台没声 → 真离线，断；
+         4) 程序当时也瞎着 → 没证据：窗口不超过一天猜它连着（机器是 24 小时
+            开的），超过一天不猜，断。
+       云端没有「程序没开」这回事，hb=0、不给 run：并集静默就是机器没开，断。 */
+    var alive = (HISTDATA && HISTDATA.alive) || [];   // 设备活动区间
+    var run = (HISTDATA && HISTDATA.run) || [];       // 程序活动区间（仅本地有）
+    var hb = (HISTDATA && HISTDATA.hb) || 0;          // 心跳窗口 ms
+    var gapMax = Math.max(20 * 60000, span / 40);     // 仅在拿不到活动区间时兜底
+    var spanHit = function (sp, a, b) {
+      for (var q = 0; q < sp.length; q++) {
+        if (sp[q][1] > a && sp[q][0] < b) return true;
+      }
+      return false;
+    };
+    var midAlive = function (sp, a, b) {   // 去掉两端 Margin 后该时间线里还有没有记录
+      var lo = a + 10 * 60000, hi = b - 10 * 60000;
+      if (hi <= lo) return true;           // 缺口本身就小，按正常节奏算它活着
+      return spanHit(sp, lo, hi);
+    };
+    var gapDead = function (a, b) {        // true = 这段要断开（设备真没说话）
+      if (!alive.length) return (b - a) > gapMax;      // 老后端没给区间：退回阈值
+      if (b - a <= hb) return false;                   // 1) 正常巡检节奏
+      if (midAlive(alive, a, b)) return false;         // 2) 设备活着，值没变
+      if (!run.length) return true;                    // 云端：并集静默=机器没开
+      if (midAlive(run, a, b)) return true;            // 3) 程序在跑、设备没声
+      return (b - a) > 24 * 3600000;                   // 4) 程序也瞎着：短窗口连，长窗口断
+    };
+    var deadWins = [];                     // 真断了线的窗口，供「无数据」标注
+    var unitOf = {};
+    ((HISTDATA && HISTDATA.vars) || []).forEach(function (v) { unitOf[v.name] = v.unit || ''; });
+    var pts = [];
+    names.forEach(function (n) {
+      var s = (series[n] || []).map(function (p) { return [p[0], parseFloat(p[1]), String(p[1])]; })
+        .filter(function (p) { return !isNaN(p[1]); });
+      if (!s.length) return;
+      var color = HCOLORS[(HNAMES.indexOf(n) >= 0 ? HNAMES.indexOf(n) : 0) % HCOLORS.length];
+      ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.6;
+      var stride = Math.max(1, Math.floor(s.length / (w * 2)));
+      var seg = [], last = null;
+      var flush = function () {
+        if (seg.length >= 2) {
+          ctx.beginPath();
+          for (var q = 0; q < seg.length; q++) {
+            if (q === 0) ctx.moveTo(X(seg[q][0]), Y(seg[q][1]));
+            else ctx.lineTo(X(seg[q][0]), Y(seg[q][1]));
+          }
+          ctx.stroke();
+        } else if (seg.length === 1) {          // 只有一个点也画出来，别让它隐形
+          ctx.beginPath(); ctx.arc(X(seg[0][0]), Y(seg[0][1]), 2.4, 0, 6.2832); ctx.fill();
+        }
+        seg = [];
+      };
+      for (var i3 = 0; i3 < s.length; i3++) {
+        if (i3 % stride !== 0 && i3 !== s.length - 1) continue;
+        if (last !== null && gapDead(last, s[i3][0])) {
+          deadWins.push([last, s[i3][0]]);
+          flush();
+        }
+        seg.push(s[i3]); last = s[i3][0];
+        pts.push({ x: X(s[i3][0]), y: Y(s[i3][1]), t: s[i3][0],
+                   v: s[i3][2], u: unitOf[n] || '', n: n, c: color });
+      }
+      flush();
+    });
+    /* 「无数据」只标在没有线的地方：程序没覆盖到的头尾，加上真断了线的窗口。
+       设备活着、只是值没变被瘦身掉的空缺不标——那儿有线，标了自相矛盾。 */
+    var gMax = 0, gAt = 0;
+    var noteGap = function (a, b) {
+      if (b - a > gMax) { gMax = b - a; gAt = a + (b - a) / 2; }
+    };
+    if (alive.length) {
+      noteGap(t0, alive[0][0]);                        // 开头：记录还没攒到这儿
+      noteGap(alive[alive.length - 1][1], t1);         // 结尾：最近的记录之后
+    }
+    deadWins.forEach(function (d) { noteGap(d[0], d[1]); });
+    if (gMax > span * 0.08) {
+      ctx.fillStyle = '#AEB4BD'; ctx.font = '11px system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('无数据', Math.min(Math.max(X(gAt), L + 30), w - R - 30), T + (h - T - B) / 2);
+    }
+    HIST_GEO = { pts: pts };
+    if (!cv.__htip) {
+      cv.__htip = true;
+      var box = cv.parentNode;
+      var tip = document.createElement('div'); tip.className = 'htip';
+      var mk = document.createElement('div'); mk.className = 'hmark';
+      box.appendChild(tip); box.appendChild(mk);
+      var hide = function () { tip.style.display = 'none'; mk.style.display = 'none'; };
+      cv.addEventListener('mouseleave', hide);
+      cv.addEventListener('mousemove', function (ev) {
+        var G = HIST_GEO;
+        if (!G || !G.pts.length) { hide(); return; }
+        var r = cv.getBoundingClientRect();
+        var mx2 = ev.clientX - r.left, my = ev.clientY - r.top, best = null, bd = 26;
+        for (var q = 0; q < G.pts.length; q++) {
+          var p = G.pts[q], dx = p.x - mx2, dy = p.y - my, d2 = dx * dx + dy * dy;
+          if (d2 < bd * bd) { bd = Math.sqrt(d2); best = p; }
+        }
+        if (!best) { hide(); return; }
+        tip.innerHTML = '<b>' + esc(best.n) + '</b> ' + esc(best.v) + esc(best.u)
+          + '<span class="htime">' + fmtTs(best.t) + '</span>';
+        tip.style.display = 'block';
+        var tw = tip.offsetWidth;
+        tip.style.left = Math.min(Math.max(4, best.x + 10), r.width - tw - 4) + 'px';
+        tip.style.top = Math.max(2, best.y - 36) + 'px';
+        mk.style.display = 'block'; mk.style.background = best.c;
+        mk.style.left = (best.x - 3.5) + 'px'; mk.style.top = (best.y - 3.5) + 'px';
+      });
+    }
   }
   window.addEventListener('resize', function () {
     if (document.body.dataset.view === 'history' && HISTDATA && HCUR) paintHist();

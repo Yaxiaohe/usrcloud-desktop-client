@@ -47,7 +47,7 @@ REC_SUFFIX = ('-' + _HOSTNAME) if _HOSTNAME else ''
 DEFAULT_INTERVAL = 900          # 15 分钟
 RATE_PER_SEC = 3.0              # 令牌桶平均速率（请求/秒）
 RATE_BURST = 5                  # 令牌桶突发上限
-CONCURRENCY = 3                 # 并发数
+CONCURRENCY = 3                 # 巡检并发数（默认值；设置页的「并发线程」可覆盖，见 set_concurrency）
 LIST_TTL = 3600                 # 设备列表缓存时长（秒）
 BACKOFF_429 = 1800              # 触发风控后的暂停时长（秒）
 MAX_BACKOFF = 3600              # 连续失败的最大退避（秒）
@@ -162,10 +162,15 @@ class ApiError(Exception):
 
 class WatchEngine:
 
-    def __init__(self, base, log=None):
+    def __init__(self, base, log=None, concurrency=None):
         self.base = base
         self.rules_path = os.path.join(base, RULES_FILE)
         self._log = log
+        # 并发数：默认 CONCURRENCY；设置页改「并发线程」后由 set_concurrency 覆盖
+        try:
+            self.concurrency = max(1, min(8, int(concurrency)))
+        except (TypeError, ValueError):
+            self.concurrency = CONCURRENCY
         self._stop = threading.Event()
         self._thread = None
         self._scan_lock = threading.Lock()
@@ -575,7 +580,7 @@ class WatchEngine:
             rows, info = self._fetch_device(dev['no'], tok)
             return cfg, tok, dev, rows, info
 
-        with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+        with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
             futs = {}
             for cfg, tok, d in jobs:
                 if self._stop.is_set():
@@ -859,6 +864,16 @@ class WatchEngine:
         sec = max(300, min(86400, sec))
         self.state['interval'] = sec
         return sec
+
+    def set_concurrency(self, n):
+        """设置页改「并发线程」时同步过来（巡站截图用的是同一份设置）。
+        返回生效值；带进来的值不合法就保持原样。"""
+        try:
+            n = int(n)
+        except (TypeError, ValueError):
+            return self.concurrency
+        self.concurrency = max(1, min(8, n))
+        return self.concurrency
 
     def device_state(self, acc, no):
         return self._devices.get('{}|{}'.format(acc, no))
@@ -1267,6 +1282,25 @@ class WatchEngine:
             n_total += len(rows_mon)
         self._say('监控记录: 本轮落盘 {} 行'.format(n_total))
 
+    # 活动区间合并阈值：两次记录间隔不超过它就算"设备一直活着"。
+    # 本地巡检约 30 分钟一轮、平台按变量瘦身（值没变就不落点），
+    # 单看一个变量的缺口根本分不清"值没变"和"设备离线"，
+    # 必须拿「这台设备任何变量有没有记录」当活着的证据。
+    ALIVE_MERGE = 60 * 60 * 1000
+
+    @staticmethod
+    def _alive_spans(timestamps):
+        """把一串时刻合并成 [[start, end], ...] 活动区间（start/end 为 ms）。
+        间隔 > ALIVE_MERGE 的断开——那才是设备真没说话的窗口。"""
+        ts = sorted({int(t) for t in timestamps if t})
+        spans = []
+        for t in ts:
+            if spans and t - spans[-1][1] <= WatchEngine.ALIVE_MERGE:
+                spans[-1][1] = t
+            else:
+                spans.append([t, t])
+        return spans
+
     def local_history(self, acc, dev_no, hours=24, want=None, max_vars=6):
         """从本地监控记录 CSV 读某台设备的历史（不请求平台）。
         数据来源：每轮巡检自动落盘的 监控记录_YYYY-MM.csv + 手动保存的 历史数据_YYYY-MM.csv"""
@@ -1280,6 +1314,8 @@ class WatchEngine:
         seen = set()
         agg = {}                       # 变量名 -> {tm: val}（去重：本地文件可能重叠）
         order = []                     # 变量出现顺序
+        dev_ts = set()                 # 这台设备所有变量的记录时刻（活着的证据）
+        run_ts = set()                 # 全部账号全部设备的记录时刻（程序在跑的证据）
         if os.path.isdir(out_dir):
             for fn in sorted(os.listdir(out_dir)):
                 if not fn.endswith('.csv'):
@@ -1305,9 +1341,19 @@ class WatchEngine:
                             if len(row) <= max(c):
                                 continue
                             tm, a, _nm, no, nm, val = (row[i] for i in c)
+                            if tm < start_s:
+                                continue
+                            try:
+                                ms = int(datetime.strptime(
+                                    tm, '%Y-%m-%d %H:%M:%S').timestamp() * 1000)
+                            except ValueError:
+                                continue
+                            # 任何账号任何设备的一行，都证明「程序当时在跑」——
+                            # 折线图要靠它区分「设备离线」和「程序没开」
+                            run_ts.add(ms)
                             if a != acc or no != dev_no:
                                 continue
-                            if tm < start_s or val.strip() in ('', '-'):
+                            if val.strip() in ('', '-'):
                                 continue
                             k = (nm, tm)
                             if k in seen:
@@ -1316,11 +1362,7 @@ class WatchEngine:
                             if nm not in agg:
                                 agg[nm] = []
                                 order.append(nm)
-                            try:
-                                ms = int(datetime.strptime(
-                                    tm, '%Y-%m-%d %H:%M:%S').timestamp() * 1000)
-                            except ValueError:
-                                continue
+                            dev_ts.add(ms)
                             agg[nm].append([ms, val])
                 except Exception:
                     continue
@@ -1336,8 +1378,15 @@ class WatchEngine:
             rows = sorted(agg.get(nm, []), key=lambda t: t[0])
             if rows:
                 series[nm] = rows
+        # 心跳窗口：写入规则是固定 60 分钟（与手机版 v0.28 一致，见 _record_rows），
+        # 但那一行要等到「下一轮巡检」才补写，所以值不变时相邻两行的观测间隔
+        # 最大逼近 60 分钟 + 巡检周期（15 分钟一轮→60，25 分钟一轮→75）。
+        # 折线图拿它当「不需要再找证据的缺口上限」——注意这是观测上限，不是心跳本身。
+        hb_ms = int(self.state.get('interval', 900)) * 1000 + 60 * 60000
         return {'ok': True, 'vars': [{'name': n, 'unit': ''} for n in order],
-                'series': series, 'hours': hours, 'source': 'local'}
+                'series': series, 'hours': hours, 'source': 'local',
+                'alive': self._alive_spans(dev_ts),
+                'run': self._alive_spans(run_ts), 'hb': hb_ms}
 
     def history(self, acc, dev_no, hours=24, want=None, max_vars=6):
         """按需拉某台设备的历史数据（折线图）。
@@ -1423,13 +1472,20 @@ class WatchEngine:
                 if oldest <= start + 60000:
                     break
         series = {}
+        alive_ts = set()               # 全部已取变量的时刻并集（设备活着的证据）
         for dp, rows in agg.items():
             nm = name_by_rel.get(dp)
             if not nm:
                 continue
             rows.sort(key=lambda t: t[0])
             series[nm] = rows
-        return {'ok': True, 'vars': meta, 'series': series, 'hours': hours}
+            for row in rows:
+                alive_ts.add(row[0])
+        # 平台按变量瘦身（值没变就不落点），单变量缺口不代表离线；
+        # 但只取了入选的那几个变量，并集是"尽力而为"的活着证据。
+        # 平台不补心跳，hb=0：并集静默就当成机器没开。
+        return {'ok': True, 'vars': meta, 'series': series, 'hours': hours,
+                'alive': self._alive_spans(alive_ts), 'hb': 0}
 
     def save_history(self, acc, dev_no, hours=24, want=None, max_vars=6):
         """拉取历史数据并留档到本地：历史数据/历史数据_YYYY-MM.csv。

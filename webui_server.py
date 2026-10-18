@@ -84,6 +84,19 @@ ST = {
 }
 
 
+def _sync_concurrency():
+    """「并发线程」这一份设置同时管巡站截图和后台监控巡检，改一处两边都生效。
+    监控引擎默认自己写死 3，用户把设置调到 6/8 时不同步的话，
+    后台巡检还是老速度 —— 看着就是「设置没生效」。"""
+    w = globals().get('WATCHER')
+    if w is None:
+        return
+    try:
+        w.set_concurrency(ST['workers'])
+    except Exception:
+        pass
+
+
 def _load_settings():
     """启动时从 运行参数.json 恢复上次保存的设置"""
     try:
@@ -96,6 +109,7 @@ def _load_settings():
             ST['notify_mode'] = nm
     except Exception:
         pass
+    _sync_concurrency()
 
 
 def get_close_mode():
@@ -504,6 +518,7 @@ def _runner(sel, device_nos):
 
         args = SimpleNamespace(limit=0, workers=ST.get('workers') or R.WORKERS,
                                browser_mode=False, no_headless=False, multi=len(sel) > 1)
+        print('并发线程: {} 台同时处理'.format(args.workers))
         total_ok = total_on = 0
 
         for i, cfg in enumerate(sel, 1):
@@ -724,6 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                         w = 0
                     if 1 <= w <= 8:
                         ST['workers'] = w
+                        _sync_concurrency()
                 nm = str(body.get('notify_mode') or '')
                 if nm in ('off', 'flash', 'toast', 'both'):
                     ST['notify_mode'] = nm
@@ -1294,10 +1310,15 @@ class Handler(BaseHTTPRequestHandler):
         sel = [a for a in accs if a['name'] in names]
         if not sel:
             return self._err('没有勾选任何账号')
+        # 请求带了合法值（1–8）才覆盖；带空 / 带错 / 超范围一律保留已保存的设置。
+        # 旧写法是 int(body.get('workers') or R.WORKERS)：请求里没带或带 0 时
+        # 会悄悄把用户存好的值改回默认 4 —— 「设置没生效」的观感就是这么来的。
         try:
-            ST['workers'] = max(1, min(8, int(body.get('workers') or R.WORKERS)))
-        except Exception:
-            ST['workers'] = R.WORKERS
+            w = int(body.get('workers') or 0)
+        except (TypeError, ValueError):
+            w = 0
+        if 1 <= w <= 8:
+            ST['workers'] = w
         threading.Thread(target=_runner, args=(sel, body.get('device_nos') or {}),
                          daemon=True).start()
         self._json({'ok': True})
@@ -1316,6 +1337,7 @@ class Handler(BaseHTTPRequestHandler):
                     'n': len(logs),
                     'stage': ST['stage'],
                     'progress': {'done': done, 'total': ST['total']},
+                    'workers': ST['workers'],
                     'results': res,
                     'error': ST['error'],
                     'batch': os.path.relpath(b, BASE) if b else None,
