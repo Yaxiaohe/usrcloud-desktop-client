@@ -748,6 +748,41 @@ def _pill_text(draw, xy, text, size, bold=False, color='#1a1a1a', anchor='ls'):
     return f
 
 
+# ---- 水温变量优先显示 ----
+# 截图卡片只画前 MAX_CARDS 个变量，旧版按平台返回顺序截取：当时钟_分、T1修正
+# 这类工程参数排在前面时，出水温度/进水温度/供水温度T1/回水温度T2 这些关键
+# 水温常常被挤到后排甚至直接截掉——而巡站时最想先看到的就是水温。
+# 渲染前把水温变量提到最前（组内保持平台原相对顺序），其余变量原序跟随。
+# 判定只看变量名：含「水」，且含「温度」或以「温」结尾（「水温」这种没写
+# 「温度」二字的也算）。室内温度T3/室外温度T4 不是水；R744/R134a 各类制冷剂
+# 温度也不是水；水流量/水压不是温度；T1修正/制冷停止温度/水温设定是工程参数
+# 和设定值，同样不动。
+WATER_TEMP_KEYS = ('水',)
+
+
+def _is_water_temp(name):
+    n = str(name or '').strip()
+    return any(k in n for k in WATER_TEMP_KEYS) and ('温度' in n or n.endswith('温'))
+
+
+def _row_name(row):
+    try:
+        return row[1]
+    except Exception:
+        return ''
+
+
+def water_temp_first(rows):
+    """重排变量行：水温相关行排最前，其余按原序跟随。只改顺序不改内容；
+    没有水温变量时返回等价新列表（调用方照常截取即可）。"""
+    rows = list(rows or [])
+    wt = [r for r in rows if _is_water_temp(_row_name(r))]
+    if not wt:
+        return rows
+    rest = [r for r in rows if not _is_water_temp(_row_name(r))]
+    return wt + rest
+
+
 def render_mobile_cards_pil(dev, data, out_path, status):
     """无浏览器环境（免安装版）下的截图渲染：Pillow 本地绘制，
     版式与浏览器版 render_mobile_cards 完全一致（1170px 宽 = 390 逻辑 × 3 倍）。"""
@@ -764,8 +799,9 @@ def render_mobile_cards_pil(dev, data, out_path, status):
         d.rounded_rectangle(box, radius=r, fill=fill)
 
     # ---- 数据准备（与浏览器版同源） ----
+    # 水温变量优先：先重排再截取，别让关键水温被工程参数挤出前 MAX_CARDS
     cards_src = []
-    for row in (data.get('rows') or [])[:MAX_CARDS]:
+    for row in water_temp_first(data.get('rows'))[:MAX_CARDS]:
         if len(row) < 5:
             continue
         name, tm, cur = row[1], row[3], row[4]
@@ -882,12 +918,13 @@ def render_mobile_cards(render_pg, dev, data, out_path, status):
     """把数据按小程序'实时概况'样式渲染成手机宽度页面并截图（含在线/离线徽标）
     只渲染前 MAX_CARDS 个变量：模板里的修正值/时钟/时间段等工程参数不进图，
     也避免部分设备变量多达 50 个时整张图被拉成超长条（旧版浏览器表格每页 10 行，观感与此一致）。
+    水温相关变量（名称含「温度」且含「水」）优先排在前面，见 water_temp_first。
     render_pg 为 None 时改用 Pillow 本地绘制（免安装版，无浏览器）。"""
     if render_pg is None:
         render_mobile_cards_pil(dev, data, out_path, status)
         return
     cards = []
-    for row in (data.get('rows') or [])[:MAX_CARDS]:
+    for row in water_temp_first(data.get('rows'))[:MAX_CARDS]:
         # 表格列: 变量ID | 变量名称 | 变量类型 | 更新时间 | 当前值 | 操作
         if len(row) < 5:
             continue
