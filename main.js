@@ -665,6 +665,12 @@ function setupContextMenu(win) {
       if (info && info.name) {
         const nm = info.name;
         items.push({ label: '复制站点名称', click: () => clipboard.writeText(nm) });
+        // 置顶该站：巡站 / 数据监控 / 历史数据三个列表共用同一份置顶（都走 sortDevs）。
+        // 菜单文字跟着当前状态变，用户点一次就知道是"置顶"还是"取消"。
+        items.push({
+          label: info.pinned ? '取消置顶该站' : '置顶该站（排到列表最前）',
+          click: () => menuRun(win, 'pin', info.no || nm, info.view)
+        });
         items.push({ type: 'separator' });
         items.push({ label: '刷新这台设备的实时数据', click: () => menuRun(win, 'refresh', info.no || nm, info.view) });
       }

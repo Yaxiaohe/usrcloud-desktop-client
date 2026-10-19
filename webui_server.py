@@ -45,6 +45,43 @@ SETTINGS_FILE = os.path.join(BASE, '运行参数.json')   # 设置页持久化�
 CLOSE_MODE_FILE = os.path.join(BASE, '关闭方式.json')  # 关闭按钮行为：ask=每次询问 / tray=收托盘 / exit=直接退出
                                                     # 与 Electron 壳 main.js 共用同一个文件，避免两处设置打架
 
+# 变量置顶规则（三处共用）：数据监控实时卡、巡站截图、历史数据都按它排。
+# varsort.py 是独立小模块；万一被打包脚本漏拷（Mac 包按文件清单复制就出过这种事），
+# 也用这里的兜底实现顶上——功能照常，别让整个后端起不来。
+try:
+    import varsort
+except Exception:                                        # pragma: no cover
+    class _VarSortFallback(object):
+        DEFAULT_RULES = [{'key': k, 'on': True} for k in
+                         ('出水温度', '进水温度', '供水温度', '回水温度')]
+        SKIP = ('修正', '原值', '设定', '系数', '补偿', '偏置')
+
+        def default_rules(self):
+            return [dict(r) for r in self.DEFAULT_RULES]
+
+        def load(self):
+            return self.default_rules()
+
+        def save(self, rules):
+            return self.default_rules()
+
+        def order(self, items, name_of=None, rules=None):
+            rs = rules or self.load()
+            get = name_of or (lambda x: x)
+
+            def rk(x):
+                n = str(get(x) or '')
+                if any(w in n for w in self.SKIP):
+                    return 10 ** 6
+                for i, r in enumerate(rs):
+                    if r.get('key') and r['key'] in n:
+                        return i
+                return 10 ** 6
+            return sorted(list(items or []), key=rk)
+
+    varsort = _VarSortFallback()
+    print('[警告] 缺少 varsort.py，变量置顶退回内置默认规则')
+
 if sys.stdout is None:                      # pythonw.exe 下没有控制台
     sys.stdout = open(os.devnull, 'w', encoding='utf-8', errors='ignore')
 if sys.stderr is None:
@@ -674,6 +711,14 @@ class Handler(BaseHTTPRequestHandler):
             if name == 'settings':
                 return self._json({'ok': True, 'workers': ST['workers'],
                                    'notify_mode': ST.get('notify_mode', 'both')})
+            if name == 'closemode':
+                # 设置页打开时读当前关闭按钮行为（原来这个分支被误放进 do_POST，
+                # GET 一直 404，设置页因此显示不出当前选中的那一项）
+                return self._json({'ok': True, 'mode': get_close_mode()})
+            if name == 'varsort':
+                # 变量置顶规则：数据监控实时卡 / 巡站截图 / 历史数据三处共用
+                return self._json({'ok': True, 'rules': varsort.load(),
+                                   'defaults': varsort.default_rules()})
             if name == 'notifypoll':
                 # Electron 壳每 5 秒轮询：有新异常/恢复事件时按设置做任务栏闪烁或系统通知
                 try:
@@ -748,8 +793,12 @@ class Handler(BaseHTTPRequestHandler):
                     ST['workers'], ST['notify_mode']))
                 return self._json({'ok': True, 'workers': ST['workers'],
                                    'notify_mode': ST.get('notify_mode', 'both')})
-            if name == 'closemode':
-                return self._json({'ok': True, 'mode': get_close_mode()})
+            if name == 'varsort':
+                # 保存变量置顶规则（设置页「上移/下移/置顶/删除」后即存）
+                rules = varsort.save(body.get('rules'))
+                print('[设置] 变量置顶规则 = {}'.format(
+                    ' → '.join(r['key'] for r in rules if r.get('on')) or '（全部停用）'))
+                return self._json({'ok': True, 'rules': rules})
             if name == 'notifyhealth':
                 # Electron 壳投递系统通知后回报结果：
                 #   which=native（Electron 原生）/ ps（Windows PowerShell 直投）/ as（macOS AppleScript）
@@ -1244,6 +1293,9 @@ class Handler(BaseHTTPRequestHandler):
             vals.append({'name': k, 'v': v.get('v'), 't': v.get('t'),
                          'rw': x.get('rw', 0), 'id': x.get('id'),
                          'ident': x.get('ident', '')})
+        # 变量置顶：平台返回的字典顺序每次可能不同（出水/进水来回换位置就是这么来的），
+        # 这里统一按 变量排序.json 重排，顺序固定给前端。
+        vals = varsort.order(vals, name_of=lambda x: x['name'])
         self._json({'ok': True, 'status': s['status'], 'age': R.fmt_age(s['age_min']),
                     'newest': s.get('newest'), 'ts': s['ts'], 'n_points': s.get('n_points'),
                     'anoms': s.get('anoms') or [], 'vals': vals})

@@ -205,6 +205,14 @@
   .mitem{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:8px;font-size:12.5px;cursor:pointer;color:#3B424C}
   .mitem:hover{background:#F4F6F9}
   .mitem .no{color:#9CA3AF;font-size:11px;margin-left:auto;font-family:ui-monospace,Consolas,monospace}
+  /* 置顶站点弹窗：搜索框 + 「已置顶」状态 */
+  .pnq{margin:10px 18px 0;height:32px;border:1px solid #DDE1E6;border-radius:7px;padding:0 10px;font-size:12.5px;flex:none;outline:none}
+  .pnq:focus{border-color:#C9D6F5;box-shadow:0 0 0 2px rgba(47,107,255,.08)}
+  .mitem.pinned{background:#FFF9F0;color:#7A4310}
+  .mitem.pinned:hover{background:#FFF4E4}
+  .mitem .pinst{font-size:10.5px;color:#C2590A;background:#FDEBD8;border-radius:4px;padding:1px 5px;flex:none}
+  .mitem .dot2{width:8px;height:8px;border-radius:50%;border:1.5px solid #D3D8DF;flex:none}
+  .mitem.pinned .dot2{background:#F97316;border-color:#F97316}
   .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #F0F2F5}
   .mfoot .btn{flex:none;white-space:nowrap}
   /* 关闭方式选择（关闭按钮时弹出）—— 与站点选择等弹窗同一套视觉 */
@@ -243,6 +251,32 @@
   .row label{min-width:96px;color:#5A6472}
   input[type=number]{width:72px;height:30px;border:1px solid #DDE1E6;border-radius:7px;padding:0 9px;font-size:13px}
   .hint{font-size:11.5px;color:#9CA3AF;margin-left:6px}
+
+  /* ===== 设置页：变量置顶列表（像微信置顶联系人一样「置顶 + 上下移动」） ===== */
+  .vslist{display:flex;flex-direction:column;gap:6px;width:100%;max-width:520px}
+  .vsrow{display:flex;align-items:center;gap:8px;background:#F7F8FA;border:1px solid #E7E9ED;
+         border-radius:7px;padding:5px 9px;font-size:12.5px;color:#3A4048}
+  .vsrow.on{background:#F0F5FF;border-color:#CBD9F5}
+  .vsrow .vsno{width:20px;color:#A3A9B2;font-size:11px;text-align:right;font-family:'Segoe UI',sans-serif}
+  .vsrow .vsk{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vsrow.off .vsk{color:#A3A9B2;text-decoration:line-through}
+  /* 行内小按钮：变量置顶与置顶站点共用（.vsb 只在这两处出现） */
+  .vsb{height:22px;padding:0 7px;font-size:11px;border-radius:5px;border:1px solid #E1E4E9;
+       background:#fff;color:#5A6472;cursor:pointer;line-height:20px;flex:none}
+  .vsb:hover{background:#EEF2F8;color:#2F6BFF;border-color:#CBD9F5}
+  .vsb:disabled{opacity:.35;cursor:default;background:#fff;color:#9CA3AF;border-color:#EDEFF2}
+  .vsb.top{color:#C2590A;border-color:#F6D8BE;background:#FEF4EC}
+  .vsb.del:hover{background:#FDECEC;color:#D9383D;border-color:#F4C7C7}
+  .vsempty{font-size:12px;color:#A3A9B2;padding:6px 2px}
+
+  /* ===== 设置页：置顶站点清单（与变量置顶同一套行样式，暖色区分） ===== */
+  .pnlist{display:flex;flex-direction:column;gap:6px;width:100%;max-width:560px}
+  .pnrow{display:flex;align-items:center;gap:8px;background:#FFF9F0;border:1px solid #F6E3CE;
+         border-radius:7px;padding:5px 9px;font-size:12.5px;color:#3A4048}
+  .pnrow .pnno{width:20px;color:#C9A27E;font-size:11px;text-align:right;font-family:'Segoe UI',sans-serif}
+  .pnrow .pnnm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pnrow .pnac{font-size:11px;color:#A3A9B2;flex:none;max-width:98px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
 
   /* ===== 报告页：左账号 / 右日志 ===== */
   .rwrap{flex:1;display:flex;min-height:0}
@@ -326,6 +360,12 @@
   .wbar.bad .dot{background:#E5484D}
   .wbar .gz{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .drow .wflag{display:inline-block;width:6px;height:6px;border-radius:50%;background:#E5484D;margin-right:6px;vertical-align:1px;flex:none}
+  /* 置顶站点：图钉 + 左侧橙条 + 极淡暖底。
+     橙条用 inset box-shadow 而不是 border/伪元素——.drow 是 grid 容器，
+     多一个子元素或真边框都会把三列宽度挤歪。选中态 .on 优先，所以只作用于 :not(.on)。 */
+  .drow .pini{display:inline-flex;align-items:center;color:#F97316;margin-right:6px;vertical-align:-1px;flex:none}
+  .drow.pin:not(.on){background:#FFF9F0;box-shadow:inset 3px 0 0 #F97316}
+  .drow.pin:not(.on):hover{background:#FFF4E4}
 </style>
 
 <div id="stage"><div class="win" id="win">
@@ -617,9 +657,43 @@
         </div>
       </div>
       <div class="row"><label>往期批次</label><span class="hint" style="margin-left:0">每个批次跑完都会保留，程序不会自动删除；需要腾空间请到巡站页点「清理往期」勾选删除。</span></div>
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:5px">变量置顶</label>
+        <div style="flex:1;min-width:0">
+          <div class="vslist" id="vsList"><div class="vsempty">正在读取…</div></div>
+          <div class="arow" style="margin-top:9px;flex-wrap:wrap">
+            <input type="text" id="vsNew" placeholder="关键词，如 出水温度" maxlength="24"
+                   style="width:190px;height:30px;border:1px solid #DDE1E6;border-radius:7px;padding:0 9px;font-size:12.5px"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();vsAdd();}">
+            <button type="button" class="btn" onclick="vsAdd()">添加并置顶</button>
+            <button type="button" class="btn" onclick="vsReset()">恢复默认</button>
+          </div>
+          <p class="ahint" style="margin:8px 0 0">
+            从上往下按顺序匹配变量名（<b>包含即命中</b>：「出水温度」也命中「出水温度1」）。
+            <b>数据监控、巡站截图、历史数据</b>三处都按这张表排，顺序定死就不会再来回跳。
+            带「修正 / 原值 / 设定 / 系数 / 补偿 / 偏置」的工程参数不参与置顶；取消勾选＝这条不生效。
+            改动<b>即时保存</b>，不用点上方的「保存设置」。
+          </p>
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:5px">置顶站点</label>
+        <div style="flex:1;min-width:0">
+          <div class="pnlist" id="pnPinned"><div class="vsempty">还没有置顶站点。点下面「添加站点…」，或在设备列表里右键 →「置顶该站」。</div></div>
+          <div class="arow" style="margin-top:9px;flex-wrap:wrap">
+            <button type="button" class="btn" onclick="openPinModal()">添加站点…</button>
+            <button type="button" class="btn" onclick="pnClearAll()">全部取消</button>
+          </div>
+          <p class="ahint" style="margin:8px 0 0">
+            置顶的站固定排在<b>巡站截图、数据监控、历史数据</b>三个列表最前面，并成为自动选中的第一台。
+            这里从上到下的顺序就是置顶区里的先后（↑ ↓ 调整）；点 ✕ 取消置顶后它会回到原来的位置。
+            也可以在设备列表里直接右键置顶，两处是同一份数据。改动<b>即时生效</b>。
+          </p>
+        </div>
+      </div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.3（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.4.1（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -635,6 +709,20 @@
         <button class="btn" onclick="smAll(true)">全选</button>
         <button class="btn" onclick="smAll(false)">全不选</button>
         <button class="btn pri" onclick="smOk()">确定</button>
+      </div>
+    </div>
+  </div>
+  <!-- 置顶站点选择弹窗（设置页「添加站点…」打开） -->
+  <div class="mwrap" id="pinModal">
+    <div class="mbox">
+      <div class="mhead"><span>置顶站点</span><button class="x" onclick="closePinModal()" title="关闭">✕</button></div>
+      <div class="mhint">点一行即置顶 / 取消置顶，<b>即时生效</b>；也可以直接在设备列表里右键操作，两处是同一份数据。</div>
+      <input type="text" id="pnQ" class="pnq" placeholder="搜索站点名或账号…"
+             oninput="pnFilter(this.value)">
+      <div class="mlist" id="pnList"><div class="phold">正在读取设备列表…</div></div>
+      <div class="mfoot">
+        <button class="btn" onclick="pnClearAll()">全部取消</button>
+        <button class="btn pri" onclick="closePinModal()">完成</button>
       </div>
     </div>
   </div>
@@ -777,6 +865,12 @@
   var ICON_CP = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
     + ' stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/>'
     + '<path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  // 图钉（置顶标记）：必须是纯 svg、不含任何文字——.dname 的 textContent 还要用来
+  // 复制站点名称、按名字找行，混进 emoji 或文字都会把那两处搞坏。
+  var ICON_PIN = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">'
+    + '<path d="M15.2 2.3a1 1 0 0 0-1.5.1l-3 4.2-4.5 1.1a1 1 0 0 0-.5 1.7l3 3'
+    + '-3.6 3.6a1 1 0 1 0 1.4 1.4l3.6-3.6 3 3a1 1 0 0 0 1.7-.5l1.1-4.5 4.2-3'
+    + 'a1 1 0 0 0 .1-1.5z"/></svg>';
 
   // ---------- 自适应（画布严格等于窗口可用区）----------
   // 之前只算宽度、高度在 CSS 里写死 760px、宽度还有 maxW 上限 → 窗口放大后画布不动，只多出灰边。
@@ -905,6 +999,48 @@
      排序放在 renderDevices 入口做（三个列表共用），好处是
      box.children[i] 与 devs[i] 永远一一对应 —— 「自动选中第一台」
      「挑第一台有截图的」这些按下标取行的逻辑不会错位。 */
+  /* ===================== 置顶站点 =====================
+     需求（2026-10-19）：常看的站固定排在最前面，像微信置顶联系人那样。
+     入口：设备列表行右键 →「置顶该站 / 取消置顶该站」（桌面版 Electron 原生菜单），
+     巡站、数据监控、历史数据三个列表共用同一份置顶（都走 renderDevices → sortDevs）。
+
+     存 localStorage `usrcloud_pins`，不落后端：这是纯显示偏好，换台电脑不该被同步，
+     也免得为一个排序偏好再起一套接口。记录同时留 no 和 name：
+       · no（设备编号）稳——平台给设备改名也还认得出；
+       · name 兜底——个别接口不返回编号时仍能命中。
+     置顶区内的先后仍按当前排序规则，取消置顶就自动回到它原来的位置。 */
+  var PINS = [];
+  try {
+    var _pn = JSON.parse(localStorage.getItem('usrcloud_pins') || '[]');
+    if (Object.prototype.toString.call(_pn) === '[object Array]') {
+      PINS = _pn.filter(function (x) { return x && (x.no || x.name); }).slice(0, 60);
+    }
+  } catch (e) { }
+  function savePins() {
+    try { localStorage.setItem('usrcloud_pins', JSON.stringify(PINS)); } catch (e) { }
+  }
+  function pinIdx(d) {
+    if (!d) return -1;
+    for (var i = 0; i < PINS.length; i++) {
+      var p = PINS[i];
+      if (p.no && d.no && p.no === d.no) return i;
+      if (p.name && d.name && p.name === d.name) return i;
+    }
+    return -1;
+  }
+  function isPinned(d) { return pinIdx(d) >= 0; }
+  function togglePin(d) {
+    if (!d) return false;
+    var i = pinIdx(d);
+    if (i >= 0) PINS.splice(i, 1);
+    else {
+      PINS.push({ no: d.no || '', name: d.name || '', acc: d._acc || '' });
+      if (PINS.length > 60) PINS.shift();     // 上限：防误点堆成一片，把列表全顶上去
+    }
+    savePins();
+    return i < 0;                             // true = 本次是「置顶」
+  }
+
   var SORT = { k: 'name', dir: 1 };
   try {
     var _sv = JSON.parse(localStorage.getItem('usrcloud_devsort') || 'null');
@@ -1025,6 +1161,16 @@
   function sortDevs(devs) {
     var f = CMP[SORT.k] || CMP.name, dir = SORT.dir;
     return (devs || []).slice().sort(function (a, b) {
+      /* 置顶优先，且不受升/降序影响：置顶区永远在最上面（否则点一下表头，
+         置顶的站就跑到最底下了，跟"置顶"两个字自相矛盾）。
+         多个置顶之间按设置页里的先后排（↑↓ 调的就是这个），
+         这样「置顶清单」看到的顺序和列表里看到的完全一致。 */
+      var ia = pinIdx(a), ib = pinIdx(b);
+      if (ia !== ib) {
+        if (ia < 0) return 1;
+        if (ib < 0) return -1;
+        return ia - ib;
+      }
       var r = f(a, b);
       /* 主键相等时一律按站名兜底：这样任意两次渲染的顺序完全一致，
          不会出现「同样两台设备，这次 A 在前下次 B 在前」的抖动。 */
@@ -1162,7 +1308,12 @@
       var flag = (live && d.anoms && d.anoms.length)
         ? '<i class="wflag" title="' + esc(d.anoms.map(function (x) { return x.name; }).join('、')) + '"></i>'
         : '';
-      row.innerHTML = '<div class="dname">' + flag + esc(d.name || d.no || '')
+      // 置顶标记：纯 svg（无文字），不影响 .dname 的 textContent
+      var pinned = isPinned(d);
+      if (pinned) row.classList.add('pin');
+      var pini = pinned
+        ? '<i class="pini" title="已置顶 · 右键可取消置顶">' + ICON_PIN + '</i>' : '';
+      row.innerHTML = '<div class="dname">' + pini + flag + esc(d.name || d.no || '')
         + '<button class="cpname" title="复制站点名称">' + ICON_CP + '</button></div>'
         + '<div class="st"><i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st) + '</div>'
         + '<div class="age" data-nt="' + esc(d.newest || '') + '" title="'
@@ -1342,8 +1493,9 @@
     // 记住用户已输入但没提交的值，重建后回填（否则每 8 秒自动刷新会把输入冲掉）
     var typed = {};
     $$('#pvBodyW .wnum').forEach(function (el) { if (el.value !== '') typed[el.dataset.i] = el.value; });
-    LIVE_VALS = j.vals || [];
-    var rows = (j.vals || []).map(function (r, i) {
+    LIVE_VALS = varSort(j.vals || [], function (x) { return x.name; });
+    // 排序后 data-i 就是这个数组的下标，写入/单独刷新取到的仍是同一行
+    var rows = LIVE_VALS.map(function (r, i) {
       var v = (r.v == null || r.v === '') ? '—' : String(r.v);
       // 每行最右的「单独刷新」：向设备发一次只读的主动采集，拿这台设备这一路的当前值
       var rf = '<button class="wrf" data-i="' + i + '" title="刷新这个变量（让设备立刻上报当前值）">'
@@ -2572,19 +2724,42 @@
   // ---------- 历史数据页（折线图） ----------
   var HCUR = null, HISTDATA = null, HSEL = [], HNAMES = [];
   var HCOLORS = ['#2F6BFF', '#E5484D', '#12A150', '#C77700', '#8E4EC6', '#008EA0'];
-  // 变量展示优先级：进出水温度 > 压力 > 能源 > 其它温度 > 其余（同级保持原顺序）
-  var HVAR_PRIO = [
-    [/(供|回|进|出)水温度|水温/, 0],
-    [/压力|压差|水压/, 1],
-    [/能耗|电量|电能|能源|功率|用电|频率/, 2],
-    [/温度/, 3]
+
+  // ---------- 变量置顶（数据监控 / 历史数据 / 巡站截图三处共用一套规则） ----------
+  // 旧版历史页用正则分级（水电温同级），数据监控直接照抄平台返回顺序，截图另有一套
+  // —— 三处口径都不一样，出水/进水谁在前全看平台这次怎么排，位置就来回跳。
+  // 现在统一读 变量排序.json（后端 /api/varsort），顺序一旦定下就固定。
+  var VARSORT = null;                    // null = 还没拉到，先用默认规则顶上
+  var VS_DEF = [
+    { key: '出水温度', on: true }, { key: '进水温度', on: true },
+    { key: '供水温度', on: true }, { key: '回水温度', on: true }
   ];
-  function varPrio(n) {
-    for (var i = 0; i < HVAR_PRIO.length; i++) if (HVAR_PRIO[i][0].test(n)) return HVAR_PRIO[i][1];
-    return 9;
+  var VS_SKIP = ['修正', '原值', '设定', '系数', '补偿', '偏置'];
+  function vsRules() { return VARSORT || VS_DEF; }
+  function vsRank(n) {
+    n = String(n == null ? '' : n);
+    if (!n) return 1e6;
+    for (var s = 0; s < VS_SKIP.length; s++) if (n.indexOf(VS_SKIP[s]) >= 0) return 1e6;
+    var low = n.toLowerCase(), rs = vsRules();
+    for (var i = 0; i < rs.length; i++) {
+      if (rs[i].on === false) continue;
+      var k = String(rs[i].key || '').trim().toLowerCase();
+      if (k && low.indexOf(k) >= 0) return i;
+    }
+    return 1e6;
   }
-  function varSort(arr) {
-    return arr.slice().sort(function (a, b) { return varPrio(a) - varPrio(b); });
+  // 稳定排序：同名次保持传入顺序（ES2019 起 Array.sort 稳定），没配的变量不会互相换位
+  function varSort(arr, nameOf) {
+    var get = nameOf || function (x) { return x; };
+    return arr.slice().sort(function (a, b) { return vsRank(get(a)) - vsRank(get(b)); });
+  }
+  function loadVarSort() {
+    return api('/api/varsort').then(function (j) {
+      if (j && j.ok && j.rules && j.rules.length) { VARSORT = j.rules; VS_RULES = j.rules; }
+      if (j && j.ok && j.defaults && j.defaults.length) VS_DEF = j.defaults;
+      if (typeof paintVarSort === 'function') paintVarSort();
+      return VARSORT;
+    }).catch(function () { return VARSORT; });
   }
   function histPick(d) {
     HCUR = { acc: d._acc || SEL || '', no: d.no, name: d.name || d.no || '' };
@@ -2938,6 +3113,225 @@
   }
   window.gotoWatch = gotoWatch;
 
+  // ---------- 设置页：变量置顶（关键词 + 上下移动 + 置顶）----------
+  // 后端 变量排序.json 是唯一权威；这里只是它的编辑器。
+  // 保存成功后立刻按新顺序重绘当前打开的画面，用户点完就能看到效果。
+  var VS_RULES = null;                 // 编辑中的副本（null = 还没从后端拿到）
+  function paintVarSort() {
+    var box = $('#vsList');
+    if (!box) return;
+    var rs = VS_RULES || vsRules();
+    if (!rs.length) {
+      box.innerHTML = '<div class="vsempty">列表是空的——所有变量按平台原顺序显示。点「恢复默认」加回四条常用水温。</div>';
+      return;
+    }
+    box.innerHTML = rs.map(function (r, i) {
+      var on = r.on !== false;
+      return '<div class="vsrow' + (on ? ' on' : '') + '">'
+        + '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="vsToggle(' + i + ',this.checked)"'
+        + ' title="取消勾选＝这条不生效（保留在列表里，方便随时开回来）" style="flex:none">'
+        + '<span class="vsno">' + (i + 1) + '</span>'
+        + '<span class="vsk" title="' + esc(r.key) + '">' + esc(r.key) + '</span>'
+        + '<button type="button" class="vsb top" onclick="vsTop(' + i + ')"'
+        + ' title="置顶：直接排到第 1 条"' + (i === 0 ? ' disabled' : '') + '>置顶</button>'
+        + '<button type="button" class="vsb" onclick="vsMove(' + i + ',-1)" title="上移"'
+        + (i === 0 ? ' disabled' : '') + '>↑</button>'
+        + '<button type="button" class="vsb" onclick="vsMove(' + i + ',1)" title="下移"'
+        + (i === rs.length - 1 ? ' disabled' : '') + '>↓</button>'
+        + '<button type="button" class="vsb del" onclick="vsDel(' + i + ')" title="删除这条">✕</button>'
+        + '</div>';
+    }).join('');
+  }
+  function vsSave(next) {
+    if (!next || !next.length) {
+      if (!confirm('列表会变成空的，所有变量按平台原顺序显示。确定？')) return;
+    }
+    VS_RULES = next;                                  // 先本地重绘，网络慢也不卡手
+    paintVarSort();
+    var msg = $('#setMsg');
+    api('/api/varsort', { method: 'POST', body: JSON.stringify({ rules: next }) })
+      .then(function (j) {
+        if (!j || !j.ok) { if (msg) { msg.textContent = '变量排序保存失败'; msg.style.color = '#D9383D'; } return; }
+        VS_RULES = j.rules; VARSORT = j.rules;
+        paintVarSort();
+        if (msg) { msg.textContent = '变量排序已保存 ✓（三处同时生效）'; msg.style.color = '#12A150'; }
+        // 当前正在看的画面立刻按新顺序重排，不用等下一轮刷新
+        if (document.body.dataset.view === 'watch' && PV_LIVE) {
+          renderLiveCard({ no: PV_LIVE.no, name: PV_LIVE.name, _acc: PV_LIVE.acc });
+        }
+        if (document.body.dataset.view === 'history' && HCUR) paintHist();
+      })
+      .catch(function () {
+        if (msg) { msg.textContent = '后端未连接，变量排序只在本次运行内生效'; msg.style.color = '#C77700'; }
+      });
+  }
+  window.vsMove = function (i, d) {
+    var rs = (VS_RULES || vsRules()).slice(), j = i + d;
+    if (j < 0 || j >= rs.length) return;
+    var t = rs[i]; rs[i] = rs[j]; rs[j] = t;
+    vsSave(rs);
+  };
+  window.vsTop = function (i) {
+    if (i <= 0) return;
+    var rs = (VS_RULES || vsRules()).slice();
+    rs.unshift(rs.splice(i, 1)[0]);
+    vsSave(rs);
+  };
+  window.vsDel = function (i) {
+    var rs = (VS_RULES || vsRules()).slice();
+    rs.splice(i, 1);
+    vsSave(rs);
+  };
+  window.vsToggle = function (i, on) {
+    var rs = (VS_RULES || vsRules()).slice();
+    if (!rs[i]) return;
+    rs[i] = { key: rs[i].key, on: !!on };
+    vsSave(rs);
+  };
+  window.vsAdd = function () {
+    var el = $('#vsNew');
+    var k = ((el && el.value) || '').trim();
+    if (!k) { toast('先输入一个关键词，例如「出水温度」'); if (el) el.focus(); return; }
+    var rs = (VS_RULES || vsRules()).slice();
+    if (rs.some(function (r) { return String(r.key).toLowerCase() === k.toLowerCase(); })) {
+      toast('「' + k + '」已经在列表里了，用 ↑↓ 调它的位置就行');
+      return;
+    }
+    if (rs.length >= 40) { toast('最多 40 条，够用了'); return; }
+    rs.unshift({ key: k, on: true });          // 新加的默认置顶（按钮就叫「添加并置顶」）
+    if (el) el.value = '';
+    vsSave(rs);
+  };
+  window.vsReset = function () {
+    if (!confirm('恢复成默认四条（出水温度 → 进水温度 → 供水温度 → 回水温度）？自己加的关键词会丢掉。')) return;
+    vsSave(VS_DEF.map(function (r) { return { key: r.key, on: true }; }));
+  };
+
+  // ---------- 设置页：置顶站点（清单 + 选站弹窗） ----------
+  // 和右键是同一份 PINS：这里改完，设备列表（三个视图）立刻重排；
+  // 右键改完，这里也立刻跟着变（pinChanged 两边都调）。
+  function paintPins() {
+    var box = $('#pnPinned');
+    if (!box) return;
+    if (!PINS.length) {
+      box.innerHTML = '<div class="vsempty">还没有置顶站点。点下面「添加站点…」，'
+        + '或在设备列表里右键 →「置顶该站」。</div>';
+      return;
+    }
+    box.innerHTML = PINS.map(function (p, i) {
+      var nm = p.name || p.no || '(未知设备)';
+      return '<div class="pnrow">'
+        + '<span class="pnno">' + (i + 1) + '</span>'
+        + '<span class="pnnm" title="' + esc(nm) + '">' + esc(nm) + '</span>'
+        + (p.acc ? '<span class="pnac" title="' + esc(p.acc) + '">' + esc(p.acc) + '</span>' : '')
+        + '<button type="button" class="vsb" onclick="pnMove(' + i + ',-1)" title="上移"'
+        + (i === 0 ? ' disabled' : '') + '>↑</button>'
+        + '<button type="button" class="vsb" onclick="pnMove(' + i + ',1)" title="下移"'
+        + (i === PINS.length - 1 ? ' disabled' : '') + '>↓</button>'
+        + '<button type="button" class="vsb del" onclick="pnRemove(' + i + ')"'
+        + ' title="取消置顶（回到原来的位置）">✕</button>'
+        + '</div>';
+    }).join('');
+  }
+  function pinChanged(msg) {
+    refreshDevices(false);        // 三个列表按新顺序重画（非三视图时它自己会 return）
+    paintPins();
+    var ml = $('#pnList');
+    if (ml && $('#pinModal') && $('#pinModal').classList.contains('show')) pnPaint(PN_DEVS, PN_Q);
+    if (msg) toast(msg);
+  }
+  window.pnMove = function (i, d) {
+    var j = i + d;
+    if (j < 0 || j >= PINS.length) return;
+    var t = PINS[i]; PINS[i] = PINS[j]; PINS[j] = t;
+    savePins(); pinChanged();
+  };
+  window.pnRemove = function (i) {
+    if (!PINS[i]) return;
+    var nm = PINS[i].name || PINS[i].no || '';
+    PINS.splice(i, 1); savePins();
+    pinChanged('已取消置顶「' + nm + '」');
+  };
+  window.pnClearAll = function () {
+    if (!PINS.length) { toast('当前没有置顶站点'); return; }
+    if (!confirm('取消全部 ' + PINS.length + ' 个置顶站点？取消后它们回到各自原来的位置。')) return;
+    PINS = []; savePins();
+    pinChanged('已取消全部置顶');
+  };
+
+  var PN_DEVS = [], PN_Q = '';
+  function pnPaint(devs, q) {
+    PN_Q = q || '';
+    var box = $('#pnList');
+    if (!box) return;
+    if (!devs || !devs.length) {
+      box.innerHTML = '<div class="phold">没有读到设备列表。先到「数据监控」页选一个账号，再回来添加。</div>';
+      return;
+    }
+    var kw = PN_Q.trim().toLowerCase();
+    var list = devs.filter(function (d) {
+      if (!kw) return true;
+      return String(d.name || '').toLowerCase().indexOf(kw) >= 0
+          || String(d._acc || '').toLowerCase().indexOf(kw) >= 0
+          || String(d.no || '').toLowerCase().indexOf(kw) >= 0;
+    });
+    // 已置顶的排前面（且按置顶顺序），方便一眼核对
+    list.sort(function (a, b) {
+      var ia = pinIdx(a), ib = pinIdx(b);
+      if (ia !== ib) {
+        if (ia < 0) return 1;
+        if (ib < 0) return -1;
+        return ia - ib;
+      }
+      return nameCmp(a, b);
+    });
+    if (!list.length) { box.innerHTML = '<div class="phold">没有匹配「' + esc(PN_Q) + '」的站点</div>'; return; }
+    box.innerHTML = list.map(function (d) {
+      var on = pinIdx(d) >= 0;
+      return '<div class="mitem' + (on ? ' pinned' : '') + '" onclick="pnToggle(' + devs.indexOf(d) + ')">'
+        + '<span class="dot2"></span>'
+        + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + esc(d.name || d.no || '') + '</span>'
+        + (on ? '<span class="pinst">已置顶</span>' : '')
+        + '<span class="no">' + esc(d._acc || '') + '</span>'
+        + '</div>';
+    }).join('');
+  }
+  window.pnToggle = function (i) {
+    var d = PN_DEVS[i];
+    if (!d) return;
+    var on = togglePin(d);
+    pinChanged(on ? '已置顶「' + (d.name || d.no) + '」' : '已取消置顶「' + (d.name || d.no) + '」');
+  };
+  window.pnFilter = function (v) { pnPaint(PN_DEVS, v); };
+  window.openPinModal = function () {
+    var box = $('#pinModal'), list = $('#pnList');
+    if (!box || !list) return;
+    box.classList.add('show');
+    var q = $('#pnQ'); if (q) { q.value = ''; }
+    PN_Q = '';
+    list.innerHTML = '<div class="phold">正在读取设备列表…</div>';
+    var got = function (devs) { PN_DEVS = devs; pnPaint(devs, ''); };
+    if (CUR_DEVS && CUR_DEVS.length) { got(CUR_DEVS.slice()); return; }
+    if (DEMO) {
+      var md = [];
+      ACCOUNTS.forEach(function (a) {
+        (DEMO_DEVS[a.name] || []).forEach(function (d) { md.push(withAcc(d, a.name)); });
+      });
+      got(md); return;
+    }
+    Promise.all(ACCOUNTS.map(function (a) {
+      return api('/api/devices?account=' + encodeURIComponent(a.name) + '&live=0')
+        .then(function (j) {
+          return (j && j.ok) ? (j.devices || []).map(function (d) { return withAcc(d, a.name); }) : [];
+        }).catch(function () { return []; });
+    })).then(function (arrs) { got([].concat.apply([], arrs)); })
+      .catch(function () { list.innerHTML = '<div class="phold">读取设备列表失败，请检查网络后重试。</div>'; });
+  };
+  window.closePinModal = function () { $('#pinModal').classList.remove('show'); };
+  var _pinModalEl = $('#pinModal');
+  if (_pinModalEl) _pinModalEl.onclick = function (e) { if (e.target === this) window.closePinModal(); };
+
   // 设置项：服务端持久化（运行参数.json）+ 本地缓存兑底；改动后需点「保存设置」
   // 异常提醒方式已移到「异常提醒」页（即改即存），设置页不再重复展示
   (function initSettings() {
@@ -2953,6 +3347,8 @@
     api('/api/settings').then(function (j) {
       if (j && j.ok) apply(j.workers);
     }).catch(function () {});
+    loadVarSort();      // 变量置顶规则：进页面就拉，数据监控/历史页不必等设置页打开
+    paintPins();        // 置顶站点清单（本地 localStorage，直接画）
     // 关闭按钮行为：与后端 关闭方式.json 同一份数据，改完即存，不并入「保存设置」
     api('/api/closemode').then(function (j) {
       if (j && j.ok) paintCloseChips(j.mode);
@@ -3090,7 +3486,7 @@
   }
   function closeSiteModal() { $('#siteModal').classList.remove('show'); }
   $('#siteModal').onclick = function (e) { if (e.target === this) closeSiteModal(); };
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); } });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); if (window.closePinModal) window.closePinModal(); } });
 
   // ---------- 往期截图清理 ----------
   var BATCHES = [], BM_SEL = {}, BM_ARM = false, BM_LATEST = '', BM_CUR = '';
@@ -3429,11 +3825,21 @@
         var nmEl = row.querySelector('.dname');
         var name = (nmEl ? nmEl.textContent : '').trim();
         var no = row.dataset.no || '';
-        var acc = '';
+        var acc = '', dev = null;
         for (var i = 0; i < CUR_DEVS.length; i++) {
-          if (CUR_DEVS[i] && CUR_DEVS[i].no === no) { acc = CUR_DEVS[i]._acc || ''; break; }
+          // dataset 取出来一定是字符串，设备编号可能是数字：统一按字符串比，
+          // 否则 acc 会取空，右键「刷新」就找不到账号
+          if (CUR_DEVS[i] && String(CUR_DEVS[i].no) === String(no)) {
+            acc = CUR_DEVS[i]._acc || ''; dev = CUR_DEVS[i]; break;
+          }
+        }
+        if (!dev) {
+          for (var j = 0; j < CUR_DEVS.length; j++) {
+            if (CUR_DEVS[j] && (CUR_DEVS[j].name || '') === name) { dev = CUR_DEVS[j]; break; }
+          }
         }
         return { kind: 'row', name: name, no: no, acc: acc,
+                 pinned: isPinned(dev || { no: no, name: name }),
                  view: document.body.getAttribute('data-view') || '' };
       }
       var ph = el.closest ? el.closest('.ph') : null;      // 实时数据卡
@@ -3448,6 +3854,21 @@
   };
   window.__menuAction = function (kind, val, view) {
     try {
+      if (kind === 'pin') {                    // 置顶 / 取消置顶该站（桌面版右键菜单）
+        var d = null;
+        for (var i = 0; i < CUR_DEVS.length; i++) {
+          if (!CUR_DEVS[i]) continue;
+          if (String(CUR_DEVS[i].no) === String(val) || (CUR_DEVS[i].name || '') === val) {
+            d = CUR_DEVS[i]; break;
+          }
+        }
+        if (!d) { toast('当前列表里没找到这个站点'); return; }
+        var on = togglePin(d);
+        refreshDevices(false);                 // 用 60 秒缓存重画，不为了改顺序再打一次接口
+        paintPins();                           // 设置页的置顶清单同步（右键和设置是同一份数据）
+        toast(on ? '已置顶「' + (d.name || d.no) + '」' : '已取消置顶「' + (d.name || d.no) + '」');
+        return;
+      }
       if (kind === 'refresh') {                // 刷新这台设备的实时数据
         if (document.body.getAttribute('data-view') !== 'watch') setView('watch');
         var pick = function () {

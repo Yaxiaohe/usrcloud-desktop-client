@@ -12,6 +12,9 @@ launch-log.txt
 # 运行时状态
 窗口位置.json
 关闭方式.json
+运行参数.json
+变量排序.json
+变量排序.json.tmp
 
 # 账号、缓存与业务数据（绝不入库）
 accounts.csv.bak

@@ -60,6 +60,12 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
+# 变量排序（置顶）规则：与数据监控、历史数据共用 变量排序.json 一份配置
+try:
+    import varsort
+except Exception:            # 极端情况下（脚本被单独拷走）退回内置默认顺序
+    varsort = None
+
 # 运行/暂停开关：set=运行，clear=暂停（每台设备开始前检查）。
 # 仅图形界面使用；命令行模式始终保持 set，行为与以前完全一致。
 _PAUSE_EVENT = threading.Event()
@@ -748,20 +754,29 @@ def _pill_text(draw, xy, text, size, bold=False, color='#1a1a1a', anchor='ls'):
     return f
 
 
-# ---- 水温变量优先显示 ----
+# ---- 变量置顶（顺序固定，不再随平台返回顺序漂移） ----
 # 截图卡片只画前 MAX_CARDS 个变量，旧版按平台返回顺序截取：当时钟_分、T1修正
 # 这类工程参数排在前面时，出水温度/进水温度/供水温度T1/回水温度T2 这些关键
 # 水温常常被挤到后排甚至直接截掉——而巡站时最想先看到的就是水温。
-# 渲染前把水温变量提到最前（组内保持平台原相对顺序），其余变量原序跟随。
-# 判定只看变量名：含「水」，且含「温度」或以「温」结尾（「水温」这种没写
-# 「温度」二字的也算）。室内温度T3/室外温度T4 不是水；R744/R134a 各类制冷剂
-# 温度也不是水；水流量/水压不是温度；T1修正/制冷停止温度/水温设定是工程参数
-# 和设定值，同样不动。
+#
+# v1.3 的做法是「把水温整组提到最前」，组内仍按平台原序 —— 结果出水温度和
+# 进水温度谁在前面全看平台这次怎么返回，用户看到的就是两个变量位置反复跳。
+# 现在改成一张有序的关键词表（varsort.py，存 变量排序.json）：
+#   默认 出水温度 → 进水温度 → 供水温度 → 回水温度
+# 先命中者排前，未命中的保持原相对顺序。顺序定死，且用户可在设置页自己增删、
+# 上下移动、置顶。
+#
+# _is_water_temp 保留为「这是不是一个水温读数」的判定（诊断/测试用）：
+# 名称含「水」且含「温度」或以「温」结尾；带 修正/原值/设定/系数/补偿/偏置
+# 的是工程参数，不算读数。
 WATER_TEMP_KEYS = ('水',)
+WATER_TEMP_SKIP = ('修正', '原值', '设定', '系数', '补偿', '偏置')
 
 
 def _is_water_temp(name):
     n = str(name or '').strip()
+    if any(k in n for k in WATER_TEMP_SKIP):
+        return False
     return any(k in n for k in WATER_TEMP_KEYS) and ('温度' in n or n.endswith('温'))
 
 
@@ -773,14 +788,15 @@ def _row_name(row):
 
 
 def water_temp_first(rows):
-    """重排变量行：水温相关行排最前，其余按原序跟随。只改顺序不改内容；
-    没有水温变量时返回等价新列表（调用方照常截取即可）。"""
+    """按变量置顶规则重排变量行（默认 出水→进水→供水→回水），其余原序跟随。
+
+    只改顺序不改内容；没有命中任何规则时返回等价新列表（调用方照常截取即可）。
+    规则见 varsort.load()（变量排序.json），设置页可编辑。
+    """
     rows = list(rows or [])
-    wt = [r for r in rows if _is_water_temp(_row_name(r))]
-    if not wt:
+    if not rows or varsort is None:
         return rows
-    rest = [r for r in rows if not _is_water_temp(_row_name(r))]
-    return wt + rest
+    return varsort.order(rows, name_of=_row_name)
 
 
 def render_mobile_cards_pil(dev, data, out_path, status):
