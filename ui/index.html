@@ -108,9 +108,13 @@
   .phname{padding:13px 14px 7px;font-size:13.5px;font-weight:500;line-height:1.45}
   .phmeta{padding:0 14px 12px;font-size:11.5px;color:#9CA3AF}
   .rows{padding:0 14px 14px}
-  .r{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center;height:34px;border-bottom:1px dashed #F0F2F5;font-size:12.5px}
+  .r{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:8px;align-items:center;height:34px;border-bottom:1px dashed #F0F2F5;font-size:12.5px}
   .r:last-child{border-bottom:none}
   .rk{color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* 单个变量的更新时间：当天 HH:MM、跨天 MM-DD（完整时间在 title 里）。
+     固定宽度右对齐，各行时间呈一列，不跟着变量名长短跑。 */
+  .rt{font-size:10.5px;color:#B0B5BD;font-variant-numeric:tabular-nums;white-space:nowrap;
+      text-align:right;min-width:38px;letter-spacing:.2px}
   .rv{font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
   /* 控制点（可写变量）：右列固定宽、绝不换行；变量名过长则省略号 */
   .rctl{display:flex;align-items:center;gap:6px;flex:none;white-space:nowrap}
@@ -693,7 +697,7 @@
       </div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.4.1（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.4.2（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -891,11 +895,23 @@
   fit();
 
   // ---------- 账号列表 ----------
+  var ACC_CFG = '';      // accounts.csv 配置指纹（mtime+size）：判断站点筛选/账号是否改过
+  /* 账号配置变了：设备列表缓存立刻作废并重拉。
+     原来这里不清缓存，改完站点筛选切回数据监控，看到的还是改之前那批设备
+     （60 秒缓存 + 只在切页时刷新），得等缓存过期或跑一次巡站才对。 */
+  function onAccCfgChanged() {
+    DEVS_CACHE = {};
+    var v = document.body.dataset.view;
+    if (v === 'watch' || v === 'patrol' || v === 'history') refreshDevices(true);
+  }
   function loadAccounts() {
     return api('/api/accounts').then(function (j) {
       if (j && j.ok && (j.accounts || []).length) {
+        var cfgChanged = !!(ACC_CFG && j.cfg && j.cfg !== ACC_CFG);
+        if (j.cfg) ACC_CFG = j.cfg;
         ACCOUNTS = j.accounts;
         renderAccounts();
+        if (cfgChanged) onAccCfgChanged();
         var b = j.batch ? j.batch.replace('_截图', '').replace(/(\d{8})_(\d{6})/, '$1 $2') : '无';
         $('#stRight').textContent = '上次批次 ' + b;
         if (!SEL) selectAccount('__ALL__');   // 默认选中「全部账号」
@@ -917,6 +933,22 @@
       }
     });
   }
+  /* 定时看一眼账号配置有没有变。为什么需要：用户可以在账号页点「编辑账号」
+     直接用系统编辑器改 accounts.csv（或者另一边改了文件），那种改动不会经过
+     本页面的保存按钮，前端完全不知道。这里 30 秒对一次指纹，变了就重画账号
+     并清掉设备缓存；没变就什么都不做，不打断正在看的界面。 */
+  function checkAccCfg() {
+    if (DEMO) return;
+    api('/api/accounts').then(function (j) {
+      if (!j || !j.ok || !j.cfg) return;
+      if (!ACC_CFG) { ACC_CFG = j.cfg; return; }
+      if (j.cfg === ACC_CFG) return;
+      ACC_CFG = j.cfg;
+      ACCOUNTS = j.accounts || ACCOUNTS;
+      renderAccounts();
+      onAccCfgChanged();
+    }).catch(function () {});
+  }
   /* 账号搜索关键字（左下角「搜索账号」）。
      只筛左边账号列表「显示什么」，不动 SEL、也不动右侧设备列表 ——
      这是「找账号」，不是「切账号」；选中状态从来不因为搜索被改掉。 */
@@ -936,7 +968,9 @@
     var el = $('#accList'); el.innerHTML = '';
     var shown = 0;
     // 「全部账号」聚合条目：设备合并展示，巡站一次跑全部账号
-    var allTotal = ACCOUNTS.reduce(function (s, a) { return s + (a.last ? a.last.total : 0); }, 0);
+    var allTotal = ACCOUNTS.reduce(function (s, a) {
+      return s + (typeof a.scoped === 'number' ? a.scoped : (a.last ? a.last.total : 0));
+    }, 0);
     if (accHit('全部账号', ACCOUNTS.length + ' 个账号')) {
       var itAll = document.createElement('div');
       itAll.className = 'it' + (SEL === '__ALL__' ? ' on' : '');
@@ -950,13 +984,39 @@
     }
     ACCOUNTS.forEach(function (a, i) {
       var last = a.last;
-      var sub = last ? (last.total + ' 台 · 在线 ' + last.online + ' · 离线 ' + last.offline) : '未巡站';
+      /* 「台数」以当前站点筛选为准（配置一变立刻对），在线/离线分布仍来自上次巡站；
+         两者不一致时把话说清楚，别让人以为是数据错了。 */
+      var scoped = (typeof a.scoped === 'number') ? a.scoped : null;
+      var nTotal = scoped != null ? scoped : (last ? last.total : null);
+      var sub;
+      if (!last) {
+        sub = (nTotal != null ? nTotal + ' 台 · ' : '') + '未巡站';
+      } else if (scoped != null && scoped !== last.total) {
+        sub = scoped + ' 台 · 上次巡站 在线 ' + last.online + ' / 离线 ' + last.offline;
+      } else {
+        sub = last.total + ' 台 · 在线 ' + last.online + ' · 离线 ' + last.offline;
+      }
       if (!accHit(a.name, sub)) return;
       var it = document.createElement('div');
       it.className = 'it' + (a.name === SEL ? ' on' : '');
       it.dataset.name = a.name;
       var tm = last && last.run_at ? last.run_at.slice(11, 16) : '';
-      var badge = last ? '<div class="bdg' + (a.name === SEL ? ' hot' : '') + '">' + last.total + '</div>' : '';
+      /* 徽标优先显示「当前站点筛选下有多少台」——这个数由配置决定，改完筛选立刻就对。
+         没有 scoped（监控引擎还没缓存设备列表）才退回上次巡站的统计。
+         两种来源用 title 说清楚，别让人以为数字卡住了。 */
+      var nBadge = nTotal;
+      var btip = '';
+      if (scoped != null) {
+        btip = '当前站点筛选下 ' + scoped + ' 台';
+        if (last && last.total !== scoped) {
+          btip += '；上次巡站统计 ' + last.total + ' 台（' + (tm || '—') + '）';
+        }
+      } else if (last) {
+        btip = '上次巡站 ' + last.total + ' 台（' + (tm || '—') + '）· 监控尚未取到设备列表';
+      }
+      var badge = (nBadge != null)
+        ? '<div class="bdg' + (a.name === SEL ? ' hot' : '') + '" title="' + esc(btip) + '">' + nBadge + '</div>'
+        : '';
       it.innerHTML = '<div class="av" style="background:' + avColor(i) + '">' + esc(ini(a.name)) + '</div>'
         + '<div class="imid"><div class="nm">' + esc(a.name) + '</div><div class="sub">' + esc(sub) + '</div></div>'
         + '<div class="irt"><div class="tm">' + esc(tm) + '</div>' + badge + '</div>';
@@ -968,7 +1028,10 @@
     if (!shown) {
       el.innerHTML = '<div class="empty">没有匹配「' + esc(KW_ACC) + '」的账号</div>';
     }
-    var totalDev = ACCOUNTS.reduce(function (s, a) { return s + (a.last ? a.last.total : 0); }, 0);
+    var totalDev = ACCOUNTS.reduce(function (s, a) {
+      if (typeof a.scoped === 'number') return s + a.scoped;   // 当前筛选，实时
+      return s + (a.last ? a.last.total : 0);                    // 兜底：上次巡站
+    }, 0);
     $('#accFoot').textContent = ACCOUNTS.length + ' 个账号' + (totalDev ? ' · 共 ' + totalDev + ' 台' : '');
   }
   function withAcc(d, acc) { var c = Object.assign({}, d); c._acc = acc; return c; }
@@ -1479,6 +1542,19 @@
     if (m < 1440) return (Math.round(m / 6) / 10) + ' 小时前';
     return (Math.round(m / 144) / 10) + ' 天前';
   }
+  /* 单个变量的「实际更新时间」短格式：
+       当天 → 15:42        跨天 → 10-19（完整时间放 title，悬停能看到秒）
+     全部变量都显示在同一条竖线上（.rt 固定宽度右对齐），扫一眼就能看出哪一路没在更新。 */
+  function pointTime(t) {
+    var s = String(t == null ? '' : t).trim();
+    if (!s || s === '-' || s === '—') return '';
+    var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(s);
+    if (!m) return s.slice(0, 5);
+    var d = new Date();
+    var sameDay = (+m[1] === d.getFullYear() && +m[2] === (d.getMonth() + 1)
+      && +m[3] === d.getDate());
+    return sameDay ? (m[4] + ':' + m[5]) : (m[2] + '-' + m[3]);
+  }
   function liveEmpty(name, msg) {
     return '<div class="phold">「' + esc(name) + '」暂无实时数据。<br>' + esc(msg)
       + '<br><br><button class="btn pri" onclick="fetchOne()">立即获取</button></div>';
@@ -1500,6 +1576,11 @@
       // 每行最右的「单独刷新」：向设备发一次只读的主动采集，拿这台设备这一路的当前值
       var rf = '<button class="wrf" data-i="' + i + '" title="刷新这个变量（让设备立刻上报当前值）">'
         + ICON_RF + '</button>';
+      // 这一路最后一次上报时间（后端 vals[].t；没有就留空，别显示假的 0）
+      var tt = pointTime(r.t);
+      var tcell = '<span class="rt" data-t="' + esc(r.t || '') + '"'
+        + ' title="' + (r.t ? '最后上报 ' + esc(r.t) : '这一路没有上报时间') + '">'
+        + esc(tt) + '</span>';
       if (r.rw === 1) {       // 控制点：0/1 给一键开关，其余给输入框 + 写入
         var ctl;
         if (v === '0' || v === '1') {
@@ -1516,9 +1597,11 @@
               + '<button class="wbtn" data-i="' + i + '">写入</button>';
         }
         return '<div class="r rw1"><span class="rk">' + esc(r.name) + '</span>'
+             + tcell
              + '<span class="rctl">' + ctl + rf + '</span></div>';
       }
       return '<div class="r"><span class="rk">' + esc(r.name) + '</span>'
+        + tcell
         + '<span class="rctl"><span class="rv">' + esc(v) + '</span>' + rf + '</span></div>';
     }).join('');
     setPvBodyHtml('<div class="ph"><div class="phtop">'
@@ -1570,7 +1653,7 @@
       if (!PV_LIVE || PV_LIVE.no !== no) return;
       var got = (j && j.vals && j.vals[0]) || null;
       if (j && j.ok && got) {
-        updateLiveValue(got.name || r.name, got.v);
+        updateLiveValue(got.name || r.name, got.v, got.t);
         toast('已刷新 ' + (got.name || r.name) + ' = ' + got.v);
       } else {
         toast((j && j.msg) || '刷新失败');
@@ -1580,10 +1663,13 @@
       toast('刷新失败：' + ((e && e.message) || '后端未响应'));
     });
   }
-  function updateLiveValue(name, v) {
+  function updateLiveValue(name, v, t) {
     var sv = (v == null || v === '') ? '—' : String(v);
     for (var i = 0; i < LIVE_VALS.length; i++) {
-      if (LIVE_VALS[i] && LIVE_VALS[i].name === name) LIVE_VALS[i].v = sv;
+      if (LIVE_VALS[i] && LIVE_VALS[i].name === name) {
+        LIVE_VALS[i].v = sv;
+        if (t) LIVE_VALS[i].t = t;
+      }
     }
     var rows = $$('#pvBodyW .r');
     for (var k = 0; k < rows.length; k++) {
@@ -1596,6 +1682,13 @@
         inp.value = mm ? mm[1] : (/^[-—]+$/.test(sv) ? '' : sv);
       } else if (vv) {
         vv.textContent = sv;
+      }
+      // 刚主动采集过，这一路的时间就是刚才 —— 只改这一格，不整块重画
+      var tc = rows[k].querySelector('.rt');
+      if (tc) {
+        tc.setAttribute('data-t', t || '');
+        tc.setAttribute('title', t ? ('最后上报 ' + t) : '这一路没有上报时间');
+        tc.textContent = pointTime(t);
       }
       rows[k].classList.add('flash');
       (function (el) { setTimeout(function () { el.classList.remove('flash'); }, 900); })(rows[k]);
@@ -3810,6 +3903,9 @@
   window.onAccQ = onAccQ;      // 左侧「搜索账号」输入框（内联 oninput 只认 window 上的名字）
   window.watchToggleBtn = watchToggleBtn;
   window.histReload = histReload;
+  // 账号配置刷新（账号页保存后 / 定时指纹巡检都走它）——导出便于自动化验证
+  window.loadAccounts = loadAccounts;
+  window.checkAccCfg = checkAccCfg;
   window.histToggleI = histToggleI;
   window.fetchOne = fetchOne;
   window.setView = setView;
@@ -3917,6 +4013,8 @@
   // 监控状态轮询（每 8 秒一次本机请求，开销可忽略）
   setTimeout(wPoll, 1500);
   setInterval(wPoll, 8000);
+  // 账号配置指纹巡检：别处（系统编辑器/另一个窗口）改了 accounts.csv 也能发现
+  setInterval(checkAccCfg, 30000);
   // 运行日志常驻轮询：打开软件就拉，不等「开始截图」
   setTimeout(pollLogs, 800);
   setInterval(pollLogs, 2000);

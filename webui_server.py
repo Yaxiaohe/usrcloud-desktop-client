@@ -958,7 +958,14 @@ class Handler(BaseHTTPRequestHandler):
                     'platform': a.get('platform_id') or 'W3rfV',
                     'kw': a.get('station_kw') or [],
                     'enabled': bool(a.get('enabled', True)),
-                    'last': None, 'dir': None}
+                    'last': None, 'dir': None, 'scoped': None}
+            # 当前站点筛选下管多少台：由配置决定，改完立刻生效，不必等下一次巡站。
+            # 监控引擎还没缓存设备列表时给 None，前端退回巡站统计。
+            if WATCHER is not None:
+                try:
+                    item['scoped'] = WATCHER.scoped_count(a['name'])
+                except Exception:
+                    item['scoped'] = None
             rep = snap.get(a['name'])
             if rep:
                 s = rep['report'].get('summary') or {}
@@ -995,7 +1002,16 @@ class Handler(BaseHTTPRequestHandler):
                         'src': 'live',
                     }
             out.append(item)
-        self._json({'ok': True, 'accounts': out,
+        # 账号配置指纹（mtime + 大小）：前端据此判断「站点筛选/账号是不是改过了」，
+        # 改过就丢掉设备列表的 60 秒缓存。用 stat 而不是内容 hash —— 便宜，
+        # 而且不管是通过界面保存还是直接用编辑器改 accounts.csv 都能发现。
+        cfg = ''
+        try:
+            st = os.stat(os.path.join(BASE, 'accounts.csv'))
+            cfg = '{:.3f}:{}'.format(st.st_mtime, st.st_size)
+        except Exception:
+            cfg = ''
+        self._json({'ok': True, 'accounts': out, 'cfg': cfg,
                     'batch': os.path.relpath(_latest_batch(), BASE) if _latest_batch() else None})
 
     def _accountsall(self):

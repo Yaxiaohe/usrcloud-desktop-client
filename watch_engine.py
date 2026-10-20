@@ -329,6 +329,31 @@ class WatchEngine:
         kws = cfg.get('station_kw') or []
         return (not kws) or any(k in (dev_name or '') for k in kws)
 
+    def scoped_count(self, acc_name):
+        """这个账号在**当前站点筛选**下管多少台设备。
+
+        为什么要单独有这个：左侧账号上的数字原来取「上次巡站报告的总数」，
+        所以改完站点筛选要跑一次巡站才会变——用户看到的就是「加了 15 个站，
+        数据监控还是 72」。这里用已缓存的全量设备列表 + 最新的 accounts.csv
+        配置在本地数一遍，筛选一改立刻就对，且不额外打平台接口。
+
+        还没拉过设备列表（刚启动、缓存空）时返回 None，调用方退回巡站统计。
+        """
+        try:
+            cfg = next((c for c in self._accounts() if c.get('name') == acc_name), None)
+            if not cfg:
+                return None
+            hit = self._list_cache.get(acc_name)
+            if not hit:
+                return None
+            kws = cfg.get('station_kw') or []
+            devs = hit[1] or []
+            if not kws:
+                return len(devs)
+            return len([d for d in devs if any(k in (d.get('name') or '') for k in kws)])
+        except Exception:
+            return None
+
     def set_scope(self, acc_names):
         """设置巡检范围（账号白名单）。None/空 = 全部账号。"""
         if isinstance(acc_names, str):
@@ -1145,17 +1170,19 @@ class WatchEngine:
             return {'ok': False, 'msg': r.get('msg') or '刷新失败', 'vals': []}
         out = []
         st = self.device_state(acc, dev_no)
+        nowstr = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         for pid, val in (r.get('vals') or {}).items():
             nm = by_id.get(pid)
             if not nm:
                 continue
-            out.append({'name': nm, 'v': val})
+            # 带上时间：实时卡每行要显示「这一路最后上报时间」，
+            # 原来写死字符串「刚刚」，那一列跟别行对不齐、也看不出真实时刻。
+            out.append({'name': nm, 'v': val, 't': nowstr})
             try:                              # 并进内存快照，避免自动重画时又变回旧值
                 if st is not None:
-                    st.setdefault('vals', {})[nm] = {'v': val, 't': '刚刚'}
+                    st.setdefault('vals', {})[nm] = {'v': val, 't': nowstr}
                     # 设备刚刚回报过，最新数据时间就是现在 —— 前端「数据时间」
                     # 按 newest 实时算，不同步的话会一直停在上一轮巡检的旧时间上。
-                    nowstr = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     prev = st.get('newest')
                     if not prev or prev == '-' or prev < nowstr:
                         st['newest'] = nowstr
