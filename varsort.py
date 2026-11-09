@@ -17,8 +17,10 @@ v1.3 之前三处各自排序：
 
 匹配口径
 ------------------------------------------------------------------
-· 关键词包含在变量名里即算命中（「出水温度」命中「出水温度1」）；
-· 但带 修正/原值/设定/系数/补偿/偏置 的一律不参与置顶（这些是工程参数、
+· 变量名**完全等于**关键词的排第一段（按规则顺序）；
+· 只是**包含**关键词的排第二段（也按规则顺序）——「出水温度」不会因为
+  「风机化霜出水温度1」也含这三个字就被它挤到后面去（2026-10-26 报的交错问题）；
+· 带 修正/原值/设定/系数/补偿/偏置 的一律不参与置顶（这些是工程参数、
   设定值、修正量，不是读数）；
 · 大小写不敏感（英文关键词也能用，如 t1）。
 
@@ -49,6 +51,15 @@ SKIP_WORDS = ('修正', '原值', '设定', '系数', '补偿', '偏置')
 
 MAX_RULES = 40          # 关键词条数上限（防止误粘贴几百条把列表拖垮）
 UNMATCHED = 10 ** 6     # 未命中规则的排序值：稳定排序下 = 保持原顺序
+
+# 名次分两段（2026-10-26 加）：
+#   0 .. MAX_RULES-1             变量名「完全等于」关键词
+#   SEG .. SEG+MAX_RULES-1       变量名只是「包含」关键词
+# 为什么必须分段：关键词「出水温度」也会命中「风机化霜出水温度1」。两段混在同一个
+# 名次里时，稳定排序只能按平台返回顺序摆，于是置顶的 4 条被同类变量隔开，用户看到
+# 的是「出水温度 / 风机化霜出水温度1 / 进水温度 / 风机化霜进水温度1」交错。
+# 分段后：精确的一个不留排完（出水→进水→供水→回水），只是包含的紧跟其后。
+SEG = 10 ** 3
 
 _cache = {'mtime': None, 'rules': None}
 
@@ -111,19 +122,29 @@ def skip_name(name):
 
 
 def rank(name, rules=None):
-    """变量名 → 排序值。0 最靠前（第一条规则），未命中 = UNMATCHED。"""
+    """变量名 → 排序值。0 最靠前（第一条规则），未命中 = UNMATCHED。
+
+    精确等于关键词优先（返回 0..n-1），只是包含关键词的排在其后（返回 SEG+i）。
+    注意顺序：先扫完全部规则找「精确命中」，扫的过程中顺手记下第一个「包含命中」，
+    精确命中直接返回，不等后面的规则 —— 出水温度不会被「进水温度」之类的包含规则改判。
+    """
     rules = load() if rules is None else rules
     n = str(name or '')
     if not n or skip_name(n):
         return UNMATCHED
     low = n.lower()
+    part = None                                  # 只是包含时的名次（取第一条命中的规则）
     for i, r in enumerate(rules):
         if not r.get('on', True):
             continue
         k = str(r.get('key') or '').strip().lower()
-        if k and k in low:
+        if not k:
+            continue
+        if low == k:                             # 完全等于：直接锁定最前一段
             return i
-    return UNMATCHED
+        if part is None and k in low:
+            part = i
+    return UNMATCHED if part is None else SEG + part
 
 
 def order(items, name_of=None, rules=None):

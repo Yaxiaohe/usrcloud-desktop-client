@@ -8,6 +8,10 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+// 硬件加速 / 软件渲染的判定是纯函数，单独放在 gpu_mode.js（可脱离 Electron 单测）。
+// 打包若漏拷这个文件，下面判定会走异常分支退回软件渲染 —— 至少保证程序能开。
+let GpuMode = null;
+try { GpuMode = require('./gpu_mode'); } catch (e) { /* ignore */ }
 
 // ---- 文件日志 ----
 // 双击启动时控制台窗口可能一闪而过，看不到任何报错，
@@ -16,6 +20,7 @@ const LOGF = path.join(__dirname, 'main-log.txt');
 const BOUNDS_FILE = path.join(__dirname, '窗口位置.json');   // 记住上次的窗口大小/位置
 // 关闭按钮的默认动作：'ask' 每次都问 / 'tray' 直接收到托盘 / 'exit' 直接退出
 const CLOSE_MODE_FILE = path.join(__dirname, '关闭方式.json');
+const GPU_FILE = path.join(__dirname, '渲染模式.json');    // 硬件加速 / 软件渲染的机器状态（含自愈计时）
 
 // ---- 应用图标 ----
 // 与手机版同一张「巡」字图标（build/icon.ico 由手机版 512×512 图标转换而来，含 16~256 共 7 个尺寸）。
@@ -28,8 +33,16 @@ const ICON_PATH = (() => {
   return undefined;   // 文件缺失时不传 icon，Electron 用默认
 })();
 try { fs.writeFileSync(LOGF, ''); } catch (e) { /* ignore */ }
+// 日志时间用本机时间。原来用 toISOString()，那是 UTC，比北京时间早 8 小时，
+// 排查时会把「下午 6 点重开」看成「上午 10 点」，白绕半天。
+function nowStr(d) {
+  const t = d ? new Date(d) : new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate()) + ' '
+       + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds());
+}
 function log() {
-  const s = '[' + new Date().toISOString().replace('T', ' ').slice(0, 19) + '] ' +
+  const s = '[' + nowStr() + '] ' +
             Array.prototype.slice.call(arguments).join(' ');
   try { fs.appendFileSync(LOGF, s + '\n'); } catch (e) { /* ignore */ }
   try { console.log(s); } catch (e) { /* ignore */ }
@@ -48,7 +61,7 @@ try {
     const old = (fs.readFileSync(CRASH_FILE, 'utf8') || '').split('\n').filter(Boolean);
     const tail = (fs.existsSync(LOGF) ? fs.readFileSync(LOGF, 'utf8') : '')
       .split('\n').filter(Boolean).slice(-40);
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = nowStr();
     fs.appendFileSync(CRASH_FILE,
       '\n================ ' + stamp + ' 上次进程异常退出 ================\n'
       + (tail.join('\n') || '(上次没有日志)') + '\n');
@@ -70,6 +83,10 @@ try {
   });
   app.on('child-process-gone', (ev, details) => {
     log('[FATAL] 子进程崩溃:', ev, '|', details && details.type, details && details.reason);
+    // GPU 进程崩了：硬件加速模式下一旦反复崩就降级（见 onGpuCrash）
+    if (details && details.type === 'gpu' && details.reason !== 'clean-exit') {
+      try { onGpuCrash(details); } catch (e) { log('[渲染] 崩溃处理异常:', e.message); }
+    }
   });
 } catch (e) { /* 老版本 Electron 没有这些事件，忽略 */ }
 
@@ -88,8 +105,8 @@ try { app.setAppUserModelId('有人云巡站客户端'); } catch (e) { /* ignore
 //   macOS   → osascript display notification（osToastAS）
 //
 // 用户明确要求「只保留一个通道」。历史上有三条路同时存在过，全部删除：
-//   ① Electron 原生 Notification —— 会显示成署名「Electron」的通知，且在关掉
-//      硬件加速 / in-process-gpu 的本程序里是闪退根源（原生对象被 GC 后
+//   ① Electron 原生 Notification —— 会显示成署名「Electron」的通知，且在当年那版
+//      （关掉硬件加速 + in-process-gpu）上是闪退根源（原生对象被 GC 后
 //      use-after-free）。已整段删除，仅保留注释说明，不再调用。
 //   ② 应用内横幅（页面顶部那条）—— 只在窗口处于前台时显示，切走窗口就收不到，
 //      且一轮命中多台时最多同时显示 3 条，是「软件内的推送」，不可作为提醒依据。
@@ -121,10 +138,10 @@ function osToastPS(title, body, meta) {
   // Windows 上的**唯一**系统通知通道。
   //
   // 为什么不再用 Electron 原生 Notification：
-  //   ① 它是闪退的根源。原生通知走 Chromium 通知层，本程序为了规避
+  //   ① 它是闪退的根源。原生通知走 Chromium 通知层，当年那版为了规避
   //      "GPU process isn't usable" 关了硬件加速并设了 in-process-gpu，
   //      这条路径上崩溃时 JS 层连日志都写不出来（现象是「提醒弹出来了，
-  //      然后整个程序消失」）。
+  //      然后整个程序消失」）。（v1.4.3 起默认开硬件加速，见上方渲染模式一节。）
   //   ② 它在本机实际不可用。免安装绿色版没有开始菜单快捷方式，toast 依赖
   //      已注册的 AppUserModelID，否则被系统静默丢弃 —— 实测弹出来的通知
   //      署名是「Electron」而不是「有人云巡站客户端」，说明注册没生效；
@@ -244,11 +261,7 @@ function osToastAS(title, body) {
 //   ② 它是闪退根源：原生通知对象被 GC 后 use-after-free，JS 层抓不到，直接带走主进程；
 //   ③ 免安装版没有注册 AppUserModelID，通知本来就会被系统静默丢弃（收不到又崩）。
 // 现在全程序只剩一条提醒通道，Windows 走 osToastPS()，macOS 走 osToastAS()。
-// 兼容性：部分机器/远程桌面/受限会话下 Chromium 的独立 GPU 进程会崩溃
-// （表现为 "GPU process isn't usable. Goodbye."），本工具界面简单，
-// 关闭硬件加速 + 让 GPU 在浏览器进程内运行，画面无差异但启动更稳。
-try { app.disableHardwareAcceleration(); } catch (e) { /* ignore */ }
-try { app.commandLine.appendSwitch('in-process-gpu'); } catch (e) { /* ignore */ }
+
 // 受限会话（远程桌面/服务方式启动）下渲染进程沙箱会初始化失败（reason=crashed, 0x80000003），
 // 本工具只加载本机 127.0.0.1 的页面，关闭沙箱不影响安全性。
 try { app.commandLine.appendSwitch('no-sandbox'); } catch (e) { /* ignore */ }
@@ -326,7 +339,8 @@ function runNav(meta) {
 }
 
 // 拿不到单实例锁说明程序已经在跑：这一份只用来把跳转参数转交给它，然后退出。
-if (!app.requestSingleInstanceLock()) {
+const HAS_LOCK = app.requestSingleInstanceLock();
+if (!HAS_LOCK) {
   app.quit();
 } else {
   app.on('second-instance', (event, argv) => {
@@ -338,6 +352,118 @@ if (!app.requestSingleInstanceLock()) {
       try { showMainWindow(); } catch (e) { /* ignore */ }   // 普通第二次启动：只把窗口唤到前台
     }
   });
+}
+
+// ---- 渲染模式：默认开硬件加速，崩过才降级为软件渲染 ----
+//
+// 位置有讲究：这段必须在拿到单实例锁之后（HAS_LOCK）。第二次启动（程序已在跑、
+// 用户又点了一次图标）拿不到锁会直接退出，如果那时已经往 渲染模式.json 写了 boot 标记，
+// 下一次真正的启动就会把它误判成「上次硬件模式死在半路」而白白降级一次。
+//
+// 历史：早期版本为了规避 "GPU process isn't usable. Goodbye."（远程桌面 / 受限会话 /
+// 旧显卡驱动下 Chromium 的独立 GPU 进程起不来）**默认关掉**硬件加速，并且加
+// in-process-gpu。代价是整页合成全走 CPU —— 长变量列表滚动、拖动分栏都在软合成上跑。
+// 现在改成：默认开硬件加速，只有**本机实测崩过**才降级，而且降级之后能自愈。
+//
+// 三个入口进软件渲染（任一命中即可）：
+//   ① 启动参数带 --software-render（程序崩溃后自动重启时自己加的）
+//   ② 渲染模式.json 里 mode = "sw"
+//   ③ 上次以硬件模式启动，但没走到「启动成功」标记就没了 —— GPU 一起来就崩时
+//      JS 连一行日志都写不出来，只能靠这个标记在**下一次**启动时认账。
+//
+// 判定全在 gpu_mode.js 的纯函数 decide() 里（不碰 Electron、不碰磁盘，单独可测）。
+// 自愈：软件模式撑满 retryDays（默认 14 天，每失败一次翻倍、上限 60 天）后，
+// 下一次启动再试一次硬件加速；又崩就继续软件渲染，期限再翻倍。
+const SW_RENDER_ARG = '--software-render';
+const GPU_DEFAULT_RETRY_DAYS = 14;
+const GPU_MAX_RETRY_DAYS = 60;
+const GPU_CRASH_WINDOW = 10 * 60 * 1000;   // 10 分钟内崩 2 次才算「反复崩」，单次瞬时崩溃 Chromium 自己能拉起
+const GPU_CRASH_NEED = 2;
+
+function readGpuState() {
+  try { return JSON.parse(fs.readFileSync(GPU_FILE, 'utf8')) || {}; } catch (e) { return {}; }
+}
+function writeGpuState(st) {
+  try { fs.writeFileSync(GPU_FILE, JSON.stringify(st, null, 2), 'utf8'); } catch (e) { /* ignore */ }
+}
+// 降级 / 自愈这类「跨启动」事件写进不清空的崩溃记录：main-log.txt 每次启动都被清空，事后再查就没了
+function noteCrashFile(msg) {
+  try {
+    const stamp = nowStr();
+    fs.appendFileSync(CRASH_FILE, '[' + stamp + '] [渲染] ' + msg + '\n');
+  } catch (e) { /* ignore */ }
+}
+
+let GPU_MODE = 'hw';
+let GPU_CRASHES = [];        // 本次运行内 GPU 进程崩溃的时间戳
+let GPU_BOOT_DONE = false;   // 这次硬件加速启动是否已确认正常
+// 只有正主（拿到单实例锁的那一份）才读写状态文件；第二次启动连文件都不碰
+if (HAS_LOCK) {
+  try {
+    const r = GpuMode.decide(readGpuState(), {
+      now: Date.now(),
+      argv: process.argv,
+      defaultRetryDays: GPU_DEFAULT_RETRY_DAYS,
+      maxRetryDays: GPU_MAX_RETRY_DAYS,
+    });
+    GPU_MODE = r.mode;
+    writeGpuState(r.state);
+    log('[渲染] 模式 = ' + (r.mode === 'hw' ? '硬件加速' : '软件渲染') + '（' + r.reason + '）');
+    if (r.event !== 'boot-attempt' && r.event !== 'sw-hold') noteCrashFile(r.reason);
+  } catch (e) {
+    // 判定出错（多半是打包漏了 gpu_mode.js）时保守走老路子：软件渲染，保证程序能开
+    GPU_MODE = 'sw';
+    log('[渲染] 判定异常，退回软件渲染:', e.message);
+  }
+  if (GPU_MODE === 'sw') {
+    try { app.disableHardwareAcceleration(); } catch (e) { /* ignore */ }
+    try { app.commandLine.appendSwitch('in-process-gpu'); } catch (e) { /* ignore */ }
+  }
+}
+
+// 启动成功确认：页面起来后再等十几秒，期间 GPU 没崩过，才把 boot 标记消掉。
+// 标记没消掉 = 下次启动认为「上次硬件模式死在中途」，直接降级 —— 这是唯一能在
+// 「GPU 一起来就带走整个进程」这种崩溃下留下证据的办法。
+function confirmGpuBoot() {
+  if (GPU_MODE !== 'hw' || GPU_BOOT_DONE) return;
+  if (GPU_CRASHES.length) return;   // 启动阶段已经崩过，不算成功，留着标记让下次降级
+  GPU_BOOT_DONE = true;
+  try {
+    writeGpuState(GpuMode.afterHealthyBoot(readGpuState(), GPU_DEFAULT_RETRY_DAYS));
+    log('[渲染] 硬件加速启动确认正常');
+    log('[渲染] isHardwareAccelerationEnabled =', app.isHardwareAccelerationEnabled());
+    log('[渲染] GPU 特性状态 =', JSON.stringify(app.getGPUFeatureStatus()));
+  } catch (e) { log('[渲染] 启动确认写盘失败:', e.message); }
+}
+
+function onGpuCrash(details) {
+  if (GPU_MODE !== 'hw') return;
+  const now = Date.now();
+  GPU_CRASHES.push(now);
+  GPU_CRASHES = GPU_CRASHES.filter((t) => now - t < GPU_CRASH_WINDOW);
+  const n = GPU_CRASHES.length;
+  log('[渲染] GPU 进程崩溃（10 分钟内第 ' + n + ' 次）:', details && details.reason);
+  noteCrashFile('GPU 进程崩溃 reason=' + ((details && details.reason) || '?') + '，10 分钟内第 ' + n + ' 次');
+  if (n >= GPU_CRASH_NEED) downgradeToSoftware();
+}
+
+// 反复崩 → 落盘降级 + 自动重启。
+// 渲染模式必须在下一次进程启动前定下来，跑起来改不了，所以只能重启。
+function downgradeToSoftware() {
+  try {
+    const st = GpuMode.afterCrashDowngrade(readGpuState(), Date.now());
+    const rd = Number(readGpuState().retryDays) || GPU_DEFAULT_RETRY_DAYS;
+    st.retryDays = Math.min(GPU_MAX_RETRY_DAYS, Math.max(GPU_DEFAULT_RETRY_DAYS, rd));
+    writeGpuState(st);
+  } catch (e) { /* 写盘失败也继续重启：内存里已经知道要软件渲染 */ }
+  noteCrashFile('GPU 反复崩溃，已改为软件渲染，自动重启程序');
+  log('[渲染] GPU 反复崩溃，改为软件渲染并重启');
+  const args = process.argv.slice(1).filter((a) => a !== SW_RENDER_ARG).concat([SW_RENDER_ARG]);
+  try { app.relaunch({ args }); } catch (e) {
+    log('[渲染] 自动重启失败，请手动重开程序:', e.message);
+    return;
+  }
+  setTimeout(() => { QUIT = true; app.quit(); }, 800);
 }
 
 const PORT_FILE = path.join(os.tmpdir(), 'usrcloud_patrol_port.txt');
@@ -831,10 +957,9 @@ function createWindow(port) {
         return;
       }
       // ★ 窗口就在前台、用户正看着它时，不要调 flashFrame。
-      //   flashFrame 走的是 Windows 任务栏合成器路径，而本程序为了规避
-      //   "GPU process isn't usable" 崩溃设了 in-process-gpu —— 合成器一旦在这条
-      //   路径上出错，崩的是浏览器进程本身，JS 层连日志都写不出来（实测日志停在
-      //   「[提醒] 1 条新事件」之后再无任何记录，也没有 [FATAL]）。
+      //   flashFrame 走的是 Windows 任务栏合成器路径；软件渲染模式（in-process-gpu）下
+      //   合成器一旦在这条路径上出错，崩的是浏览器进程本身，JS 层连日志都写不出来
+      //   （实测日志停在「[提醒] 1 条新事件」之后再无任何记录，也没有 [FATAL]）。
       //   而且窗口在前台时闪烁本来就没人看得见，没有任何收益。
       //
       //   只拦 on=true：on=false 是「取消程序坞弹跳」，必须照常执行，
@@ -866,7 +991,7 @@ function createWindow(port) {
           const fg = win.isFocused() && win.isVisible();
           // 任务栏闪烁：只处理「窗口不在前台」的情况。
           // 前台闪烁本来就没人看得见，而且 flashFrame 走 Windows 合成器路径，
-          // 在本程序（关了硬件加速 + in-process-gpu）上历史上出过问题，不值得再冒险。
+          // 在软件渲染模式（in-process-gpu）下历史上出过问题，不值得再冒险。
           if (j.flash && !fg) attention(true);
           // ★ 系统通知：前台后台一视同仁，一条都不漏。三处改动：
           //   ① 删掉「窗口在前台就跳过系统通知」—— 那条设计把前台提醒降级成
@@ -927,6 +1052,11 @@ function createWindow(port) {
       setTimeout(() => runNav(m), 400);
     }
   });
+  // 硬件加速启动确认：页面加载完再等 12 秒（页面没加载成功时用「窗口显示 + 25 秒」兜底，
+  // 否则一次后端故障会让这台机器被误判成「GPU 崩过」而白白降级）。
+  win.webContents.once('did-finish-load', () => setTimeout(confirmGpuBoot, 12000));
+  win.once('ready-to-show', () => setTimeout(confirmGpuBoot, 25000));
+
   win.webContents.on('render-process-gone', (e, d) => {
     log('[ERROR] 渲染进程退出:', JSON.stringify(d));
   });

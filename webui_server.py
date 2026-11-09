@@ -73,10 +73,17 @@ except Exception:                                        # pragma: no cover
                 n = str(get(x) or '')
                 if any(w in n for w in self.SKIP):
                     return 10 ** 6
+                low = n.lower()
+                part = None
                 for i, r in enumerate(rs):
-                    if r.get('key') and r['key'] in n:
+                    k = str(r.get('key') or '').strip().lower()
+                    if not k:
+                        continue
+                    if low == k:                 # 完全等于关键词 → 最前一段
                         return i
-                return 10 ** 6
+                    if part is None and k in low:
+                        part = i
+                return 10 ** 6 if part is None else 10 ** 3 + part
             return sorted(list(items or []), key=rk)
 
     varsort = _VarSortFallback()

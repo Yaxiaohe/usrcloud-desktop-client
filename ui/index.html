@@ -56,6 +56,9 @@
   .bdg{display:inline-block;margin-top:6px;min-width:20px;height:18px;line-height:18px;padding:0 6px;border-radius:9px;background:#DFE4EC;color:#5A6472;font-size:11px;text-align:center}
   .bdg.hot{background:#2F6BFF;color:#fff}
   .lfoot{border-top:1px solid #E9EBEF;padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#7B828C}
+  /* 账号栏被拖到最窄时，底线两段文字不许粘连/竖排 */
+  .lfoot>span,.lfoot>.lk{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .lfoot>.lk{margin-left:8px;flex:none}
   .lk{color:#2F6BFF;text-decoration:none;cursor:pointer}
   .lk:hover{text-decoration:underline}
 
@@ -72,7 +75,7 @@
   .btn:disabled{opacity:.5;cursor:default}
 
   .midarea{flex:1;display:flex;min-height:0}
-  .dlist{flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid #EFF1F4}
+  .dlist{flex:1;min-width:200px;display:flex;flex-direction:column;border-right:1px solid #EFF1F4}
   .dhead,.drow{display:grid;grid-template-columns:minmax(170px,1fr) 96px 104px;align-items:center;padding:0 16px}
   .dhead{height:34px;flex:none;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-bottom:1px solid #EFF1F4}
   .dhead span:last-child{text-align:right}
@@ -95,22 +98,63 @@
   .dot{width:7px;height:7px;border-radius:50%;margin-right:6px;flex:none}
   .age{font-size:11.5px;color:#8A9099;text-align:right}
   .dfoot{height:42px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-top:1px solid #F4F5F7}
+  /* 列被拖窄时底线上的两段文字不许竖排（一格一个字），宁可省略号 */
+  .dfoot>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .dfoot>span+span{margin-left:8px}
   .empty{flex:1;display:flex;align-items:center;justify-content:center;color:#A3A9B2;font-size:13px}
 
-  .pv{width:400px;flex:0 1 400px;min-width:300px;display:flex;flex-direction:column}
+  /* 实时卡固定 400：flex-shrink 必须为 0，否则设备列表（flex:1）会把它一路挤到
+     min-width，窗口再宽实时卡也不涨，变量名只剩三四个字（2026-11-09 报的问题）。 */
+  .pv{flex:0 0 400px;width:400px;min-width:0;display:flex;flex-direction:column}
   .pvh{height:34px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;background:#FCFCFD;border-bottom:1px solid #EFF1F4}
-  .pvb{flex:1;overflow-y:auto;padding:16px;display:flex;justify-content:center}
+  /* box-sizing 必须是 border-box：这个页面没有全局 *{box-sizing:border-box}，
+     .pvb 又是 flex:1 + padding:16px，content-box 下它的实际宽度会比 .pv 多 32px，
+     一直溢出到父容器外面被裁掉 —— 表现为「拖宽右栏只是多留白、右边永远空一块」。 */
+  .pvb{flex:1;min-width:0;box-sizing:border-box;overflow-y:auto;overflow-x:clip;padding:16px;display:flex;justify-content:center}
   .ph{width:300px;height:fit-content;background:#fff;border:1px solid #E7E9ED;border-radius:14px;overflow:hidden}
+  /* 实时卡 / 截图预览的白卡片跟着拖动条走：宽度 = 栏宽 - 100（两侧各留 34 呼吸位）。
+     不拖时 --pvcard 不设，退回 300，界面基线与以前完全一致。 */
+  #pvBody .ph,#pvBodyW .ph{width:var(--pvcard,300px);max-width:100%}
   .phtop{height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid #F0F2F5}
+  /* 实时卡顶部搜索条：固定在卡片外、不随内容滚走，宽度跟着右栏走 */
+  .pvq{flex:none;display:none;align-items:center;gap:8px;padding:8px 14px;background:#fff;border-bottom:1px solid #EEF0F3}
+  .pvq.on{display:flex}
+  .pvq .qi{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid #E3E6EB;border-radius:8px;
+           background:#FBFCFD;font-size:12.5px;color:#374151;outline:none}
+  .pvq .qi:focus{border-color:#2F6BFF;background:#fff;box-shadow:0 0 0 3px rgba(47,107,255,.08)}
+  .pvq .qc{flex:none;font-size:11.5px;color:#8A9099;white-space:nowrap}
+  .pvq.has .qc.bad{color:#E5484D}
+  .pvq .qx{flex:none;width:22px;height:22px;padding:0;border:none;border-radius:6px;background:#F2F4F7;
+           color:#8A9099;font-size:11px;line-height:22px;cursor:pointer;display:none}
+  .pvq.has .qx{display:block}
+  .pvq .qx:hover{background:#E8EBF0;color:#5A616B}
+  /* 搜索无结果时的提示：空白卡片看着像坏了 */
+  .qnone{display:none;padding:26px 16px;text-align:center;color:#9CA3AF;font-size:12.5px;line-height:1.9}
+  .qnone.on{display:block}
+  .qnone b{color:#5A616B;font-weight:600;word-break:break-all}
   .badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:#E7F6EC;color:#12A150;font-size:11.5px;font-weight:500}
   .badge.st{background:#FBF0DC;color:#C77700}
   .badge.of{background:#EEF0F3;color:#8A8F99}
   .phname{padding:13px 14px 7px;font-size:13.5px;font-weight:500;line-height:1.45}
   .phmeta{padding:0 14px 12px;font-size:11.5px;color:#9CA3AF}
   .rows{padding:0 14px 14px}
-  .r{display:grid;grid-template-columns:minmax(0,1fr) auto auto;column-gap:8px;align-items:center;height:34px;border-bottom:1px dashed #F0F2F5;font-size:12.5px}
+  /* 实时卡一台设备能有 300+ 行。屏幕外的行不参与布局和绘制（content-visibility），
+     拖分栏/拉窗口时不必把整块重排一遍：实测单次重排从 50ms 降到 10ms 级，
+     拖动时的长任务消失。contain-intrinsic-size 用 auto，浏览器会记住每一行
+     的真实高度（折行行更高），滚动条长度从第二次滚过起就是准的。 */
+  #pvBodyW .rows{contain:layout}
+  #pvBodyW .rows > .r{content-visibility:auto;contain-intrinsic-size:auto 34px}
+  /* 变量名列给下界 96px：可写行右列（值+单位+写入+刷新）最宽约 132px，
+     不给下界时 1fr 会被压到 59px，「压缩机1运行状态」只剩「压缩机…」。 */
+  /* 行高由内容撑：变量名放不下时折第二行，宁可行高一点也不能把名字截掉
+     （2026-11-09 报的「变量名显示不全」，可写行右侧控件占了 132px，名字只剩 84px） */
+  .r{display:grid;grid-template-columns:minmax(84px,1fr) auto auto;column-gap:8px;align-items:center;min-height:34px;border-bottom:1px dashed #F0F2F5;font-size:12.5px}
   .r:last-child{border-bottom:none}
-  .rk{color:#6B7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* text-wrap:balance 让折行两行字数接近，别出现「压缩机1运行状 / 态」这种孤字。 */
+  .rk{color:#6B7280;white-space:normal;word-break:break-all;line-height:1.25;padding:5px 0;overflow:hidden;text-wrap:balance}
+  /* 拖动分栏期间：变量名先按单行省略。折行要逐行找断行点，311 行一起重算是
+     拖动掉帧的主因之一；拖的时候没人读名字，松手立刻恢复。 */
+  body.resizing .rk{white-space:nowrap;word-break:normal;text-overflow:ellipsis;text-wrap:auto}
   /* 单个变量的更新时间：当天 HH:MM、跨天 MM-DD（完整时间在 title 里）。
      固定宽度右对齐，各行时间呈一列，不跟着变量名长短跑。 */
   .rt{font-size:10.5px;color:#B0B5BD;font-variant-numeric:tabular-nums;white-space:nowrap;
@@ -138,7 +182,7 @@
   .toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:rgba(26,29,33,.92);color:#fff;font-size:12.5px;line-height:1.6;padding:8px 14px;border-radius:8px;z-index:90;opacity:0;pointer-events:none;transition:opacity .18s;max-width:72vw;text-align:center;box-shadow:0 6px 20px rgba(20,30,50,.18)}
   .toast.on{opacity:1}
   .shot{width:100%;border-radius:10px;display:block;background:#fff}
-  .phold{width:300px;padding:40px 18px;text-align:center;color:#9CA3AF;font-size:12.5px;line-height:1.8;border:1px dashed #E2E5EA;border-radius:14px}
+  .phold{width:var(--pvcard,300px);max-width:100%;padding:40px 18px;text-align:center;color:#9CA3AF;font-size:12.5px;line-height:1.8;border:1px dashed #E2E5EA;border-radius:14px}
 
   .log{height:150px;flex:none;border-top:1px solid #EFF1F4;background:#FBFBFC;display:flex;flex-direction:column}
   .logh{height:30px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11.5px;color:#8A9099;border-bottom:1px solid #F1F2F5}
@@ -161,7 +205,9 @@
   .ptab{height:24px;padding:0 12px;border:none;border-radius:12px;background:transparent;color:#8A9099;font-size:11.5px;cursor:pointer}
   .ptab:hover{background:#F1F2F5}
   .ptab.on{background:#EAF1FE;color:#2F6BFF;font-weight:500}
-  .pvpane{flex:1;min-height:0;width:100%;overflow-y:auto;padding:16px;display:flex;justify-content:center}
+  /* width:100% + padding:16 在 content-box 下会把宽度撑成 132%，超出 .pv 的部分被裁掉，
+     表现就是「右栏拖宽了，卡片却永远靠左、右边空一截」。box-sizing 收回来即可。 */
+  .pvpane{flex:1;min-height:0;width:100%;box-sizing:border-box;overflow-y:auto;overflow-x:clip;padding:16px;display:flex;justify-content:center}
   .wstrip{flex:none;min-height:36px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:6px 20px;border-bottom:1px solid #EFF1F4;font-size:11.5px;color:#7B828C}
   .wstrip b{font-weight:500;color:#3A4048}
   .wstrip .bad{color:#D9383D}
@@ -370,6 +416,23 @@
   .drow .pini{display:inline-flex;align-items:center;color:#F97316;margin-right:6px;vertical-align:-1px;flex:none}
   .drow.pin:not(.on){background:#FFF9F0;box-shadow:inset 3px 0 0 #F97316}
   .drow.pin:not(.on):hover{background:#FFF4E4}
+
+  /* 列宽拖动条：占位宽度 0（加不加都不改变三栏像素），线用绝对定位画。
+     默认就是一条 2px 浅灰竖线 —— 看不见的东西没人会去拖；
+     悬停/拖动时变蓝加粗，中间浮出三个点当抓手。 */
+  .sp{flex:none;width:0;position:relative;cursor:col-resize;z-index:6}
+  .sp::before{content:'';position:absolute;left:-7px;top:0;bottom:0;width:15px}  /* 命中区 */
+  .sp::after{content:'';position:absolute;left:-1px;top:0;bottom:0;width:2px;
+    background:#DCE0E6;border-radius:1px;transition:background .12s,width .12s,left .12s}
+  .sp:hover::after,.sp.drag::after{background:#2F6BFF;width:4px;left:-2px}
+  /* 悬停时的小抓手（三个白点），只在指针压上去时出现，平时不干扰 */
+  .sp>.gp{position:absolute;left:50%;top:50%;width:9px;height:22px;margin:-11px 0 0 -4.5px;
+    border-radius:5px;background:#2F6BFF;opacity:0;transition:opacity .12s;pointer-events:none;
+    display:flex;align-items:center;justify-content:center;gap:1px}
+  .sp:hover>.gp,.sp.drag>.gp{opacity:1}
+  .sp>.gp i{width:1.5px;height:9px;background:#fff;border-radius:1px;display:block}
+  /* 账号栏在设置/日志页本来就不显示，拖动条跟着一起收起来 */
+  body:not([data-view="patrol"]):not([data-view="watch"]):not([data-view="history"]) .sp-col{display:none}
 </style>
 
 <div id="stage"><div class="win" id="win">
@@ -697,7 +760,7 @@
       </div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.4.2（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.4.3（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -1503,6 +1566,7 @@
     var st = b.scrollTop;
     b.innerHTML = html;
     if (st) b.scrollTop = st;
+    applyLiveFilter();       // 内容换了：搜索条的显隐和匹配数要跟着重算
   }
   function renderLiveCard(d) {
     var body = $('#pvBodyW');
@@ -1515,6 +1579,7 @@
     if (!same) {
       // 只在换设备时显示占位并滚到顶部；同设备刷新保留旧内容，避免闪一下又把滚动顶回去
       body.scrollTop = 0;
+      resetLiveSearch();      // 换设备后清空搜索词（否则可能一片空白，看着像没数据）
       setPvBodyHtml('<div class="ph"><div class="phtop"><span class="badge">实时数据</span></div>'
         + '<div class="phname">' + esc(d.name || d.no || '') + '</div>'
         + '<div class="phmeta">正在获取实时数据…</div></div>');
@@ -1559,6 +1624,73 @@
     return '<div class="phold">「' + esc(name) + '」暂无实时数据。<br>' + esc(msg)
       + '<br><br><button class="btn pri" onclick="fetchOne()">立即获取</button></div>';
   }
+  /* 实时卡的结构签名：设备 + 每个变量的名字与控件形态（只读 / 开关 / 输入框）。
+     名字或形态变了才需要重建 DOM；只有数值变了走 patchLive。 */
+  var LIVE_SIG = '';
+  function liveSig(vals) {
+    return (PV_LIVE ? PV_LIVE.acc + '|' + PV_LIVE.no : '') + '|' + vals.map(function (r) {
+      var v = (r.v == null || r.v === '') ? '' : String(r.v);
+      var kind = r.rw === 1 ? ((v === '0' || v === '1') ? 'sw' : 'num') : 'ro';
+      return r.name + ':' + kind;
+    }).join('\u0001');
+  }
+  /* 只改变化的那几格。返回 false 表示没法原地改（结构对不上），调用方回退整卡重建。 */
+  function patchLive(j) {
+    var rows = $$('#pvBodyW .r');
+    if (rows.length !== LIVE_VALS.length) return false;
+    for (var i = 0; i < rows.length; i++) {
+      var r = LIVE_VALS[i], row = rows[i];
+      var v = (r.v == null || r.v === '') ? '—' : String(r.v);
+      var inp = row.querySelector('.wnum');
+      if (inp) {
+        // 用户正在这一格里输入时不覆盖，否则每 8 秒把人家打的字冲掉
+        if (document.activeElement !== inp) {
+          var mm = /^([-+]?\d+(?:\.\d+)?)\s*(.*)$/.exec(v);
+          var nv = mm ? mm[1] : (/^[-—]+$/.test(v) ? '' : v);
+          if (inp.value !== nv) inp.value = nv;
+          var un = row.querySelector('.wunit');
+          if (un) { var ut = mm ? mm[2] : ''; if (un.textContent !== ut) un.textContent = ut; }
+        }
+      } else {
+        var vv = row.querySelector('.rv');
+        if (vv && vv.textContent !== v) vv.textContent = v;
+        var wb = row.querySelector('.wbtn');
+        if (wb) {
+          var want = '改为 ' + (v === '1' ? '0' : '1');
+          if (wb.textContent !== want) wb.textContent = want;
+        }
+      }
+      var tc = row.querySelector('.rt');
+      var tNow = String(r.t || '');
+      if (tc && tc.getAttribute('data-t') !== tNow) {
+        tc.setAttribute('data-t', tNow);
+        tc.setAttribute('title', tNow ? '最后上报 ' + tNow : '这一路没有上报时间');
+        tc.textContent = pointTime(tNow);
+      }
+    }
+    var stTxt = shownStatus(j);
+    var badge = $('#pvBodyW .phtop .badge');
+    if (badge) {
+      if (badge.textContent !== stTxt) badge.textContent = stTxt;
+      var bcls = 'badge' + (stTxt === '在线' ? '' : (stTxt === '数据陈旧' ? ' st' : ' of'));
+      if (badge.className !== bcls) badge.className = bcls;
+    }
+    var ag = $('#pvBodyW .lvage');
+    if (ag) {
+      ag.setAttribute('data-nt', j.newest || '');
+      var agt = '数据 ' + ageText(j);
+      if (ag.textContent !== agt) ag.textContent = agt;
+    }
+    var meta = $('#pvBodyW .phmeta');
+    if (meta) {
+      var an = (j.anoms || []).map(function (x) { return x.name || x.rule_name || ''; })
+        .filter(Boolean).join('、');
+      var mh = '实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量'
+        + (an ? ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>' : '');
+      if (meta.innerHTML !== mh) meta.innerHTML = mh;
+    }
+    return true;
+  }
   function paintLive(j) {
     var body = $('#pvBodyW');
     if (!body || !PV_LIVE) return;
@@ -1570,6 +1702,12 @@
     var typed = {};
     $$('#pvBodyW .wnum').forEach(function (el) { if (el.value !== '') typed[el.dataset.i] = el.value; });
     LIVE_VALS = varSort(j.vals || [], function (x) { return x.name; });
+    // ★ 结构没变（同一台设备、同一批变量、可写形态没变）就只改文本，不重建 DOM。
+    //   311 行 innerHTML 换一遍要重排整块卡片，后台每 8 秒刷一次 = 每 8 秒卡一下，
+    //   滚动位置还会跳。这里签名一致时走 patchLive 原地改数值。
+    var _sig = liveSig(LIVE_VALS);
+    if (_sig === LIVE_SIG && body.querySelector('.ph .rows') && patchLive(j)) return;
+    LIVE_SIG = _sig;
     // 排序后 data-i 就是这个数组的下标，写入/单独刷新取到的仍是同一行
     var rows = LIVE_VALS.map(function (r, i) {
       var v = (r.v == null || r.v === '') ? '—' : String(r.v);
@@ -1596,11 +1734,11 @@
               + (unitt ? '<span class="wunit">' + esc(unitt) + '</span>' : '')
               + '<button class="wbtn" data-i="' + i + '">写入</button>';
         }
-        return '<div class="r rw1"><span class="rk">' + esc(r.name) + '</span>'
+        return '<div class="r rw1" data-nm="' + esc(r.name) + '"><span class="rk" title="' + esc(r.name) + '">' + esc(r.name) + '</span>'
              + tcell
              + '<span class="rctl">' + ctl + rf + '</span></div>';
       }
-      return '<div class="r"><span class="rk">' + esc(r.name) + '</span>'
+      return '<div class="r" data-nm="' + esc(r.name) + '"><span class="rk" title="' + esc(r.name) + '">' + esc(r.name) + '</span>'
         + tcell
         + '<span class="rctl"><span class="rv">' + esc(v) + '</span>' + rf + '</span></div>';
     }).join('');
@@ -1888,11 +2026,18 @@
     h = h.replace(/在线/g, '<span class="g">在线</span>');
     return h;
   }
+  var LOG_MAX = 400;               // 日志框只留最近 400 行
   function appendLogs(lines) {
     var box = $('#logBody');
+    if (!box) return;
+    var frag = document.createDocumentFragment();
     lines.forEach(function (ln) {
-      var d = document.createElement('div'); d.innerHTML = fmtLine(ln); box.appendChild(d);
+      var d = document.createElement('div'); d.innerHTML = fmtLine(ln); frag.appendChild(d);
     });
+    box.appendChild(frag);
+    // 这个框从打开软件起每 2 秒追加一次、从不清理，开一整天就是上万行 DOM，
+    // 切页和滚动都会跟着变慢。只保留最近 LOG_MAX 行，滚出视野的旧日志本来也看不到。
+    while (box.childElementCount > LOG_MAX) box.removeChild(box.firstElementChild);
     box.scrollTop = box.scrollHeight;
   }
   var LOG_BUSY = false;
@@ -2828,18 +2973,21 @@
     { key: '供水温度', on: true }, { key: '回水温度', on: true }
   ];
   var VS_SKIP = ['修正', '原值', '设定', '系数', '补偿', '偏置'];
+  var VS_SEG = 1000;   // 名次分段：0.. 完全等于关键词；1000.. 只是包含（与 varsort.py 一致）
   function vsRules() { return VARSORT || VS_DEF; }
   function vsRank(n) {
     n = String(n == null ? '' : n);
     if (!n) return 1e6;
     for (var s = 0; s < VS_SKIP.length; s++) if (n.indexOf(VS_SKIP[s]) >= 0) return 1e6;
-    var low = n.toLowerCase(), rs = vsRules();
+    var low = n.toLowerCase(), rs = vsRules(), part = -1;
     for (var i = 0; i < rs.length; i++) {
       if (rs[i].on === false) continue;
       var k = String(rs[i].key || '').trim().toLowerCase();
-      if (k && low.indexOf(k) >= 0) return i;
+      if (!k) continue;
+      if (low === k) return i;               // 完全等于：最前一段，直接锁定
+      if (part < 0 && low.indexOf(k) >= 0) part = i;
     }
-    return 1e6;
+    return part < 0 ? 1e6 : VS_SEG + part;   // 只是包含：排在所有精确命中之后
   }
   // 稳定排序：同名次保持传入顺序（ES2019 起 Array.sort 稳定），没配的变量不会互相换位
   function varSort(arr, nameOf) {
@@ -4033,6 +4181,231 @@
   }, 15000);
 
   fit();
+
+  // ---------- 三栏宽度拖动（账号栏 / 设备列表 / 实时卡） ----------
+  /* 窗口是「按 BASE_W 排版、再整体 scale 显示」，鼠标位移必须先除以缩放系数，
+     否则窗口缩小后拖起来会比鼠标慢半拍。拖动只改 flex-basis，不改字号和行高。 */
+  var PANE_KEY = 'usrcloud_panes';
+  var PANE_DEF = { col: 296, pv: 400 };
+  var PANE = (function () {
+    var o = { col: PANE_DEF.col, pv: PANE_DEF.pv };
+    try {
+      var raw = localStorage.getItem(PANE_KEY);
+      if (raw) {
+        var j = JSON.parse(raw) || {};
+        if (+j.col >= 200) o.col = +j.col;     // 越界值直接丢弃，退回默认
+        if (+j.pv >= 260) o.pv = +j.pv;
+      }
+    } catch (e) { }
+    return o;
+  })();
+
+  function paneScale() {
+    var win = $('#win');
+    if (!win || !win.offsetWidth) return 1;
+    return (win.getBoundingClientRect().width || win.offsetWidth) / win.offsetWidth;
+  }
+  function paneAvail() {                    // 内部排版总宽（未缩放）
+    var win = $('#win');
+    return (win && win.offsetWidth) || 1440;
+  }
+  // 两栏可分总额：总宽 - 图标条 - 设备列表下限。
+  // 410 = 设备列表 400（表头三列最小和 370 加余量，低于它底部文字会挤成一字一行）
+  //       + 1px 分隔边框 + 滚动条这类固定占位，按 400 算实测只剩 396。
+  function paneBudget() { return Math.max(460, paneAvail() - 56 - 410); }
+  var PANE_MIN = { col: 200, pv: 260 };
+
+  /* 设一栏宽度，超出的部分从另一栏「借」——这就是互相侵略的自适应：
+     拖宽实时卡时账号栏自动让位（不低于 200），拖宽账号栏时实时卡让位（不低于 260），
+     中间的设备列表始终保底 400，谁都不会被挤爆。 */
+  /* budget 可以由调用方传进来。拖动时必须传：paneBudget() 要读 win.offsetWidth，
+     而上一帧刚改过栏宽，这个读会逼浏览器立刻同步重排（311 行实时卡 + 折行，
+     实测一次 33~50ms），拖动就直接掉到 15fps。拖动开始时算一次就够。 */
+  function setPane(key, want, budget) {
+    var other = key === 'col' ? 'pv' : 'col';
+    budget = budget || paneBudget();
+    var minThis = PANE_MIN[key], minOther = PANE_MIN[other];
+    want = Math.round(want);
+    var o = PANE[other];
+    if (want + o > budget) o = Math.max(minOther, budget - want);   // 对方先让
+    if (want + o > budget) want = Math.max(minThis, budget - o);    // 对方到底了，自己收
+    PANE[key] = Math.max(minThis, Math.min(want, budget - Math.min(o, minOther)));
+    PANE[other] = o;
+    applyPanes(budget);
+  }
+  function applyPanes(budget) {
+    // 窗口变小时这里临时收一下（不回写 PANE），窗口放大后按用户原来拖的值恢复，
+    // 保证任何窗口尺寸下设备列表都不会被两边的栏挤没。
+    budget = budget || paneBudget();
+    var c = PANE.col, p = PANE.pv;
+    if (c + p > budget) {
+      p = Math.max(PANE_MIN.pv, budget - c);
+      if (c + p > budget) c = Math.max(PANE_MIN.col, budget - p);
+      if (c + p > budget) p = Math.max(200, budget - c);
+    }
+    var col = document.querySelector('.col');
+    if (col) { col.style.width = c + 'px'; col.style.flex = '0 0 ' + c + 'px'; }
+    $$('.midarea > .pv').forEach(function (pv) {
+      pv.style.flex = '0 0 ' + p + 'px';
+      pv.style.width = p + 'px';
+    });
+    // 卡片宽度跟着栏宽算。下限给 180 而不是 300：右栏最小能拖到 260，
+    // 卡片还按 300 画就会撑出容器 —— 那正是底部那条横向滚动条的来源。
+    document.documentElement.style.setProperty(
+      '--pvcard', Math.max(180, p - 100) + 'px');
+  }
+  function redrawHist() {                 // 栏宽变了，折线图按新宽度重画一次
+    var cv = document.getElementById('histCanvas');
+    if (!cv || !HISTDATA || !HISTDATA.series) return;
+    try { drawHist(HISTDATA.series); } catch (e) { }
+  }
+  function savePanes() {
+    try { localStorage.setItem(PANE_KEY, JSON.stringify(PANE)); } catch (e) { }
+  }
+  function bindSplitter(el, key, sign) {
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      var s = paneScale() || 1, x0 = e.clientX, w0 = PANE[key];
+      var budget = paneBudget();        // ★ 只在这里读一次布局，拖动过程中不再读
+      var raf = 0, pend = null;
+      el.classList.add('drag');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      // 拖动中内容折行会被重算（每行都要找断行点），311 行叠起来很贵。
+      // 拖动期间先按单行省略显示，松手立刻恢复折行 —— 拖的时候没人读变量名。
+      document.body.classList.add('resizing');
+      function flush() {
+        raf = 0;
+        if (pend != null) { setPane(key, pend, budget); pend = null; }
+      }
+      function mv(ev) {
+        pend = w0 + (ev.clientX - x0) / s * sign;
+        if (!raf) raf = requestAnimationFrame(flush);   // 一帧最多算一次
+      }
+      function up() {
+        document.removeEventListener('mousemove', mv);
+        document.removeEventListener('mouseup', up);
+        if (raf) cancelAnimationFrame(raf);
+        flush();
+        el.classList.remove('drag');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.body.classList.remove('resizing');
+        applyPanes();                   // 松手后按当前窗口重算一次，校正拖动期间可能变化的预算
+        savePanes();                    // 松手才落盘，拖动过程不写 localStorage
+        redrawHist();                   // 历史折线图按新宽度重画（拖动中不重画，避免卡）
+      }
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
+    });
+    el.addEventListener('dblclick', function () {   // 双击复原，拖坏了不用去翻设置
+      PANE[key] = PANE_DEF[key];
+      applyPanes(); savePanes();
+      toast('列宽已复原');
+    });
+  }
+  (function initPanes() {
+    function mkSplit(cls, tip) {
+      var el = document.createElement('div');
+      el.className = 'sp ' + cls;
+      el.title = tip;
+      el.innerHTML = '<span class="gp"><i></i><i></i><i></i></span>';
+      return el;
+    }
+    var main = document.querySelector('.main');
+    if (main && main.parentNode) {
+      var a = mkSplit('sp-col', '拖动调整账号栏宽度 · 双击复原');
+      main.parentNode.insertBefore(a, main);
+      bindSplitter(a, 'col', 1);
+    }
+    $$('.midarea').forEach(function (mid) {   // 三个视图各一条，共用同一份宽度
+      var pv = mid.querySelector('.pv');
+      if (!pv) return;
+      var b = mkSplit('sp-pv', '拖动调整右侧栏宽度 · 双击复原');
+      mid.insertBefore(b, pv);
+      bindSplitter(b, 'pv', -1);
+    });
+    applyPanes();
+  })();
+
+  // ---------- 实时卡：搜索变量 ----------
+  /* 一台设备能有三四百个变量，靠滚动找太慢。搜索条固定在实时卡顶部（不随内容滚走），
+     输入即过滤。过滤只改行元素的 display，不重建 DOM —— 所以和「后台每 8 秒增量
+     刷新」互不干扰，也不会把正在输入的值冲掉。 */
+  var LIVE_Q = '';
+  function applyLiveFilter() {
+    var bar = document.getElementById('pvQ'), pane = $('#pvBodyW');
+    if (!bar || !pane) return;
+    var rows = pane.querySelectorAll('.rows > .r');
+    var q = LIVE_Q.trim().toLowerCase();
+    var hit = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var nm = rows[i].getAttribute('data-nm') || '';
+      var ok = !q || nm.toLowerCase().indexOf(q) >= 0;
+      rows[i].style.display = ok ? '' : 'none';
+      if (ok) hit++;
+    }
+    var n = rows.length;
+    bar.classList.toggle('on', n > 0);
+    bar.classList.toggle('has', !!q);
+    var cnt = bar.querySelector('.qc');
+    if (cnt) {
+      cnt.textContent = !n ? '' : (q ? (hit ? hit + ' / ' + n : '无匹配 · ' + n) : n + ' 个变量');
+      cnt.classList.toggle('bad', !!(q && !hit));
+    }
+    // 一行都不匹配时给句提示，否则卡片里一片空白，看着像没数据
+    var none = pane.querySelector('.qnone');
+    var needNone = !!(q && n && !hit);
+    if (needNone) {
+      if (!none) {
+        none = document.createElement('div');
+        none.className = 'qnone';
+        var rowsBox = pane.querySelector('.rows');
+        if (rowsBox && rowsBox.parentNode) rowsBox.parentNode.insertBefore(none, rowsBox.nextSibling);
+      }
+      none.innerHTML = '没有匹配「<b>' + esc(LIVE_Q.trim()) + '</b>」的变量<br>换个关键词，或点 ✕ 清空';
+      none.classList.add('on');
+    } else if (none) {
+      none.classList.remove('on');
+    }
+    if (q && pane.scrollTop) pane.scrollTop = 0;   // 过滤后回顶，否则可能停在空白处
+  }
+  function resetLiveSearch() {
+    LIVE_Q = '';
+    var bar = document.getElementById('pvQ');
+    if (!bar) return;
+    var inp = bar.querySelector('.qi');
+    if (inp) inp.value = '';
+  }
+  (function initLiveSearch() {
+    var pane = document.getElementById('pvBodyW');
+    if (!pane || !pane.parentNode) return;
+    var bar = document.createElement('div');
+    bar.className = 'pvq';
+    bar.id = 'pvQ';
+    bar.innerHTML = '<input class="qi" type="text" placeholder="搜索变量名…" spellcheck="false"'
+      + ' autocomplete="off"><span class="qc"></span>'
+      + '<button class="qx" type="button" title="清空搜索">✕</button>';
+    pane.parentNode.insertBefore(bar, pane);
+    var inp = bar.querySelector('.qi');
+    inp.addEventListener('input', function () { LIVE_Q = inp.value || ''; applyLiveFilter(); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { inp.value = ''; LIVE_Q = ''; applyLiveFilter(); inp.blur(); }
+    });
+    bar.querySelector('.qx').addEventListener('click', function () {
+      inp.value = ''; LIVE_Q = ''; applyLiveFilter(); inp.focus();
+    });
+  })();
+
+  // 窗口尺寸变化后重新套用（fit() 会改 win 的排版宽度，栏宽要跟着重算）
+  var paneRT = null;
+  window.addEventListener('resize', function () {
+    applyPanes();
+    clearTimeout(paneRT);
+    paneRT = setTimeout(redrawHist, 200);
+  });
+
   paintSortHead();   // 表头先把当前排序列的箭头画出来（默认「站名 ▲」或上次记住的那种）
   loadAccounts();
 })();
