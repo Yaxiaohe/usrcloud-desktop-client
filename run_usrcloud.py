@@ -47,6 +47,7 @@
 import argparse
 import hashlib
 import json
+import http.client
 import os
 import re
 import shutil
@@ -120,6 +121,7 @@ STATUS_TAG = {
     'stale':   '○离线(数据陈旧)',
     'offline': '○离线(无数据)',
     'blank':   '⚠采集异常',
+    'unknown': '？未取到',      # 平台拒绝/请求失败：不是设备状态，别当成离线
 }
 # ===========================================
 
@@ -135,6 +137,379 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(SCRIPT_DIR, '登录缓存')                  # token 缓存统一收纳在此子文件夹
 TOKEN_TMPL = os.path.join(CACHE_DIR, 'app_login_{}.json')        # 按 名称_手机号 分开缓存（同号不同租户也不冲突）
 
+
+# ---------------- 「平台拒绝」与「真的没数据」 ----------------
+# 有人云有两套后端：apimp.usr.cn（登录/设备信息/变量名）与 history.usr.cn:7002（最新值）。
+# token 通用，但限流和数据权限各查各的库。要命的一点是：
+#   **拒绝时它返回的 data 也是 null / 空 list，外形与「设备确实没有数据」一模一样。**
+# 所以判据只能看 status。以前代码不看 status 直接取 data，等于把「没问着」判成「设备离线」。
+KIND_THROTTLE = 'throttle'      # 5144 请求频率超限（按账号计，约 20 秒恢复）
+KIND_NOPERM = 'noperm'          # 5004 无该设备数据权限
+KIND_NODEV = 'nodev'            # 42013 无权访问该设备（例如拿设备名当内部号去查）
+KIND_AUTH = 'auth'              # 4013 / 1702 登录失效（要重新登录，不是离线）
+KIND_OTHER = 'other'
+
+REJECT_KIND = {5144: KIND_THROTTLE, 5004: KIND_NOPERM, 42013: KIND_NODEV,
+               4013: KIND_AUTH, 1702: KIND_AUTH}
+
+REJECT_TEXT = {KIND_THROTTLE: '请求频率超限',
+               KIND_NOPERM: '无该设备数据权限',
+               KIND_NODEV: '无权访问该设备',
+               KIND_AUTH: '登录失效',
+               KIND_OTHER: '平台返回错误'}
+
+
+class ApiReject(Exception):
+    """平台明确拒绝（status != 0）。
+
+    必须与「设备真的没数据」分开：前者是**这一轮没问到**，后者是**问到了，确实没有**。
+    以前两者都表现为空 rows，于是一次限流 / 一次无权限就把整批设备刷成「离线」。
+    """
+
+    def __init__(self, status, what='', payload=None):
+        self.status = status
+        self.what = what
+        self.kind = REJECT_KIND.get(status, KIND_OTHER)
+        self.text = REJECT_TEXT.get(self.kind, REJECT_TEXT[KIND_OTHER])
+        self.payload = payload
+        detail = ''
+        if isinstance(payload, dict):
+            msg = payload.get('msg') or payload.get('message') or ''
+            if msg:
+                detail = '，' + str(msg)[:60]
+        where = ('(' + what + ')') if what else ''
+        super(ApiReject, self).__init__(
+            '平台拒绝:{}{} status={}{}'.format(self.text, where, status, detail))
+
+    @property
+    def note(self):
+        """给界面看的一句话（设备名下面的橙色小字）"""
+        return '平台拒绝:' + self.text
+
+    @property
+    def throttled(self):
+        return self.kind == KIND_THROTTLE
+
+    @property
+    def auth(self):
+        return self.kind == KIND_AUTH
+
+    @property
+    def whole_account(self):
+        """影响整个账号（限流 / 登录失效），不是某一台设备的问题"""
+        return self.kind in (KIND_THROTTLE, KIND_AUTH)
+
+
+def check_status(resp, what=''):
+    """统一判定：status 不是 0 就抛 ApiReject；是 0 就原样返回。
+
+    所有取数路径都必须过这一关 —— 只判断 data 有没有内容，
+    等于把「平台没答」当成「设备没数据」。
+    """
+    status = (resp or {}).get('status')
+    if status is None or str(status) != '0':
+        try:
+            status = int(status)
+        except (TypeError, ValueError):
+            pass
+        raise ApiReject(status, what, resp)
+    return resp
+
+
+def api_data(resp, what=''):
+    """取 data。status != 0 抛 ApiReject；data 为空是**合法**结果（该设备确实没有数据）。"""
+    return (check_status(resp, what) or {}).get('data')
+
+
+# ---------------- 限流节奏：少发 + 排队 + 冷却 ----------------
+# 实测（同一台电脑、同一账号，半小时）：
+#   · 同一台 14 个点、每 3 秒一发 -> 第 6 次就被拒（累计才 84 个点）
+#   · 全账号 1054 个点打包成一发、每 3 秒一发 -> 连发 15 次全过（每次 1.2~2.0 秒）
+#   · 被拒后约 20 秒恢复；与 IP、其他账号无关，只针对该账号
+# 结论：**限流只按请求次数算，不按点数**。所以省请求的唯一办法是
+# ① 能缓存的（设备信息、变量定义，几乎不变）别每轮每台都问；
+# ② 最新值按账号一次合批（lastDataPoint 支持跨设备，返回项带 cusdeviceNo）；
+# ③ 剩下的请求也别并发猛打，排队按 3 发/秒走，撞 5144 就停 20 秒。
+DEF_TTL = 1800           # 设备信息 / 变量定义缓存（秒）：定义只在增删变量时变。
+                         # 别调太短 —— 一轮截图要逐台问定义（每台 2 发），
+                         # 缓存活了才有意义；同一次会话里连续跑几批也靠它省请求。
+PACE_GAP = 0.34          # 相邻两个平台请求的最小间隔（≈3 发/秒，与实测安全线一致）
+THROTTLE_COOL = 20       # 5144 之后停多久（实测约 20 秒恢复）
+LAST_CHUNK = 2000        # lastDataPoint 单次最多点数（超过就分片）
+
+_INFO_CACHE = {}         # '账号|设备号' -> (取到的时间, 设备元信息)
+_PTS_CACHE = {}          # '账号|设备号' -> (取到的时间, 变量点定义)
+_PACE = {'last': 0.0, 'req': 0, 'hit': 0, 'cool_until': 0.0}
+_PACE_LOCK = threading.Lock()
+
+
+def defs_cache_path():
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return os.path.join(CACHE_DIR, '变量定义缓存.json')
+
+
+_DEFS_LOADED = [False]       # 进程内只读一次盘（用 list 省掉 global）
+
+
+def load_defs_cache_once():
+    """进程起来后第一次取数时把落盘的变量定义读回内存。
+
+    只读一次：内存里已经有最新的就没必要每轮再舔一遍磁盘，
+    更重要的是——每轮重读会把「刚刚过期、正在被判定要重取」的条目又救活，
+    导致 TTL 到期后永远重取不到新定义。
+    """
+    if _DEFS_LOADED[0]:
+        return 0
+    _DEFS_LOADED[0] = True
+    return load_defs_cache()
+
+
+def load_defs_cache():
+    """把上次落盘的变量定义读回内存，返回复活了几台。
+
+    为什么要落盘：截图每点一次「开始截图」都是一个新进程，进程内缓存带不过来。
+    不落盘的话这项「缓存」只在同一次运行里有效，等于每次点都要重新拉一遍
+    47~94 台的定义（3 发/秒排队，就是十几秒到半分钟）。
+    """
+    try:
+        with open(defs_cache_path(), encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception:
+        return 0
+    now = time.time()
+    n = 0
+    for k, v in (d.get('items') or {}).items():
+        try:
+            ts, plst = float(v[0]), v[1]
+        except (TypeError, ValueError, IndexError):
+            continue
+        if plst and now - ts < DEF_TTL:
+            _PTS_CACHE[k] = (ts, plst)
+            n += 1
+    return n
+
+
+def save_defs_cache():
+    """落盘（原子写：先写 .tmp 再改名）。
+    监控进程和截图进程都可能写同一个文件，直接覆盖会有读到半截 json 的风险。"""
+    try:
+        now = time.time()
+        items = {k: [v[0], v[1]] for k, v in list(_PTS_CACHE.items())
+                 if v[1] and now - v[0] < DEF_TTL}
+        p = defs_cache_path()
+        tmp = p + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'saved_at': now, 'items': items}, f, ensure_ascii=False)
+        os.replace(tmp, p)
+        return len(items)
+    except Exception:
+        return 0
+
+
+def pace_reset():
+    """新一轮开始时清计数（缓存不清，跨轮复用）"""
+    if not isinstance(_PACE.get('last'), (int, float)):
+        _PACE['last'] = 0.0
+    _PACE['req'] = 0
+    _PACE['hit'] = 0
+    _PACE['cool_until'] = 0.0
+
+
+def _pace():
+    """排队：保证相邻两个请求至少隔 PACE_GAP 秒"""
+    with _PACE_LOCK:
+        wait = _PACE['last'] + PACE_GAP - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        _PACE['last'] = time.time()
+
+
+def paced_json(url, payload, tok, what=''):
+    """发一个平台请求：排队 + 计数 + 5144 冷却后重试一次。
+
+    status != 0 抛 ApiReject（带 note，界面能显示「平台拒绝:无该设备数据权限」）。
+    """
+    for attempt in (0, 1):
+        left = _PACE['cool_until'] - time.time()
+        if left > 0:
+            time.sleep(min(left, THROTTLE_COOL))
+        _pace()
+        _PACE['req'] += 1
+        resp = api_json(url, payload, tok)
+        st = (resp or {}).get('status')
+        if st is not None and str(st) == '0':
+            return resp
+        try:
+            sti = int(st)
+        except (TypeError, ValueError):
+            sti = -1
+        rej = ApiReject(sti, what, resp)
+        if rej.throttled and attempt == 0:
+            _PACE['cool_until'] = time.time() + THROTTLE_COOL
+            print('[限流] {} 被平台拒绝（5144），停 {} 秒后重试一次'
+                  .format(what or url, THROTTLE_COOL))
+            continue
+        raise rej
+
+
+def _send_groups(groups, tok, out, failed, depth=0):
+    """发一组设备的最新值。被拒就**按设备**二分拆小定位。
+
+    必须按台切、不能按点切：按点二分时切在设备边界上，一台没权限会把紧挨着的
+    邻台的几个点一起带进同一个 1 元素分片，结果两台都被记成失败。
+    """
+    pairs = [p for g in groups for p in g]
+    try:
+        resp = paced_json(LAST_URL, {'dataPoints': [{'cusdeviceNo': no, 'dataPointId': rid}
+                                                    for no, rid in pairs]}, tok, '最新值')
+    except ApiReject as e:
+        if e.whole_account:
+            raise          # 限流/登录失效：整个账号都别继续，上层统一处理
+        if len(groups) <= 1 or depth >= 12:
+            for no, _rid in pairs:
+                failed.setdefault(no, e.note)
+            return
+        mid = len(groups) // 2
+        _send_groups(groups[:mid], tok, out, failed, depth + 1)
+        _send_groups(groups[mid:], tok, out, failed, depth + 1)
+        return
+    for it in ((resp.get('data') or {}).get('list') or []):
+        no = it.get('cusdeviceNo')
+        out[(str(no) if no is not None else None, it.get('dataPointId'))] = it
+
+
+def fetch_last_batch(tok, pairs):
+    """最新值合批：整个账号一次发（>2000 点再分片）。返回 ({key: 项}, {设备号: 原因})。"""
+    groups = {}
+    for no, rid in pairs:
+        groups.setdefault(no, []).append((no, rid))
+    gl, chunk, n = list(groups.values()), [], 0
+    out, failed = {}, {}
+    for g in gl:
+        if chunk and n + len(g) > LAST_CHUNK:
+            _send_groups(chunk, tok, out, failed)
+            chunk, n = [], 0
+        chunk.append(g)
+        n += len(g)
+    if chunk:
+        _send_groups(chunk, tok, out, failed)
+    return out, failed
+
+
+def dev_meta(dev):
+    """截图页头那几个字（组织 / 模板 / 网关名 / 地址 / 平台在线位）。
+
+    设备列表接口的同一个响应里就带着 projectName、templateName、deviceName、
+    address、onlineOffline，不需要为它们再逐台发一次「设备信息」请求——
+    那 47 发在 3 发/秒的排队下就是白等 16 秒，且一个字的准确度都不多。
+    """
+    return {'projectName': dev.get('org') or '',
+            'templateName': dev.get('tpl') or '',
+            'deviceName': dev.get('gw') or '',
+            'address': dev.get('addr') or '',
+            'onlineOffline': dev.get('plat_online')}
+
+
+def defs_cached(acc, dev, tok):
+    """一台设备的（元信息, 变量定义），变量定义带 TTL 缓存；命中就是 0 发请求。
+
+    dev 可以只给 {'no': ...}（浏览器模式、单台重拍）——那时元信息是空的，
+    截图页头显示 '--'，不影响状态判定（判定只看变量值和上报时间）。
+    """
+    dev_no = dev['no']
+    key = '{}|{}'.format(acc, dev_no)
+    now = time.time()
+    hp = _PTS_CACHE.get(key)
+    plst = hp[1] if hp and now - hp[0] < DEF_TTL else None
+    if plst is not None:
+        _PACE['hit'] += 1
+    else:
+        pts = api_data(paced_json(POINTS_URL, {
+            'dataPointType': '', 'dataPointName': '', 'dataPointIdList': [], 'slaveId': '',
+            'cusdeviceNo': dev_no, 'getOperable': 0, 'getTimestampDatas': 1,
+            'getLocationDatas': 1, 'getStringDatas': 0, 'getBitDatas': 0,
+            'pageNo': 1, 'pageSize': 500}, tok, '变量定义'), '变量定义') or {}
+        plst = pts.get('cusdeviceDataPointList') or []
+        if plst:           # 空定义不缓存：偶发空表不能卡住半小时
+            _PTS_CACHE[key] = (time.time(), plst)
+    return dev_meta(dev), plst
+
+
+def _rows_from(dev_no, plst, last_map):
+    """变量定义 + 最新值 -> rows（结构与页面提取版一致）"""
+    rows = []
+    for p in plst:
+        unit = (p.get('unit') or '').strip()
+        r = last_map.get((str(dev_no), p.get('dataPointRelId'))) \
+            or last_map.get((None, p.get('dataPointRelId')))
+        tm, cur = '-', '-'
+        if r:
+            ts = r.get('time')
+            if ts:
+                try:
+                    tm = datetime.fromtimestamp(ts / 1000.0).strftime('%Y-%m-%d %H:%M:%S')
+                except (ValueError, OSError, OverflowError):
+                    tm = '-'
+            val = str(r.get('value') if r.get('value') is not None else '').strip()
+            if val and val != '-':
+                cur = '{} {}'.format(val, unit).strip() if unit else val
+        rows.append([str(p.get('dataPointId') or ''), p.get('name') or '', '',
+                     tm, cur, ''])
+    return rows
+
+
+def prefetch_account(cfg, tok, devs):
+    """一个账号的数据一次取齐：定义走缓存，最新值 1 发合批。
+
+    返回 (datas, notes)：
+      datas[设备号] = fetch_device_data_api 同结构（多一个 loaded：这一轮值取没取到）
+      notes[设备号] = 没取到的原因（给报告和界面看）
+    """
+    acc = cfg.get('name') or ''
+    datas, notes, defs = {}, {}, {}
+    n = len(devs)
+    got = load_defs_cache_once()   # 上次（可能是监控那边）拉过的定义直接用
+    if got:
+        print('  变量定义命中上次的缓存 {} 台（半小时内有效）'.format(got))
+    for i, d in enumerate(devs, 1):
+        no = d['no']
+        try:
+            defs[no] = defs_cached(acc, d, tok)
+        except ApiReject as e:
+            if e.whole_account:
+                raise          # 限流/登录失效：整账号停，别把这台记成「没数据」
+            notes[no] = e.note
+        except Exception as e:
+            notes[no] = '取数异常:{}'.format(repr(e)[:80])
+        # 首轮要逐台拉变量定义（每台 1 发），94 台得等半分多钟；每 10 台报一次进度，
+        # 不然界面停在「0/94」看着像卡死
+        if i % 10 == 0 or i == n:
+            print('  取数 {}/{} 台（已发 {} 次请求）'.format(i, n, _PACE['req']))
+    pairs = []
+    for no, (_info, plst) in defs.items():
+        for p in plst:
+            rid = p.get('dataPointRelId')
+            if rid is not None:
+                pairs.append((no, rid))
+    save_defs_cache()            # 新拉到的定义存下来，下次点「开始截图」就不用再拉
+    last_map, lfail = ({}, {})
+    if pairs:
+        last_map, lfail = fetch_last_batch(tok, pairs)
+    for no, (info, plst) in defs.items():
+        datas[no] = {
+            'rows': _rows_from(no, plst, last_map),
+            'org': info.get('projectName') or '--',
+            'tpl': info.get('templateName') or '--',
+            'gw': info.get('deviceName') or '--',
+            'addr': info.get('address') or '--',
+            'platform_online': info.get('onlineOffline'),
+            # 这一台的最新值没问到（无权限/被拒）时不能说它「没数据」，
+            # 交给 judge_status(known=False) 判成 unknown，沿用上一轮状态
+            'loaded': no not in lfail,
+        }
+        if no in lfail:
+            notes[no] = lfail[no]
+    return datas, notes
 
 # ---------------- 账号表格读取 ----------------
 
@@ -207,14 +582,69 @@ def load_accounts():
 
 # ---------------- 有人云 API ----------------
 
+# 每个线程对每个域名留一条连接，发完不关。
+# 原来每次 urlopen 都是新建连接：DNS + TCP + TLS 全来一遍。实测单发 0.38 秒，
+# 其中握手占掉一半，47 台就是白等十来秒。改成复用后单发降到 0.18 秒左右。
+_CONN = threading.local()
+
+
+def _conn_for(scheme, host, port, timeout):
+    pool = getattr(_CONN, 'pool', None)
+    if pool is None:
+        pool = _CONN.pool = {}
+    key = (host, port)
+    c = pool.get(key)
+    if c is None:
+        cls = http.client.HTTPSConnection if scheme == 'https' else http.client.HTTPConnection
+        c = cls(host, port, timeout=timeout)
+        pool[key] = c
+    return c
+
+
+def close_conns():
+    """关掉本线程持有的连接（进程退出、切账号时调用；不关也能被 GC 收掉）"""
+    pool = getattr(_CONN, 'pool', None) or {}
+    for c in pool.values():
+        try:
+            c.close()
+        except Exception:
+            pass
+    _CONN.pool = {}
+
+
 def api_json(url, payload, tok=None, timeout=30):
-    headers = {'Content-Type': 'application/json'}
+    """发一个平台请求，返回解析后的 JSON。
+
+    连接复用：同一线程对同一域名只握手一次。服务端可能主动断开空闲的
+    keep-alive 连接（表现为读到空响应），这种情况**重发一次**——这些都是只读
+    查询，重发不会产生副作用。
+    """
+    headers = {'Content-Type': 'application/json', 'Connection': 'keep-alive'}
     if tok:
         headers['token'] = tok
         headers['X-Access-Token'] = tok
-    req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    body = json.dumps(payload).encode()
+    u = urllib.parse.urlsplit(url)
+    https = (u.scheme == 'https')
+    port = u.port or (443 if https else 80)
+    path = u.path + (('?' + u.query) if u.query else '')
+    for attempt in (0, 1):
+        c = _conn_for('https' if https else 'http', u.hostname, port, timeout)
+        try:
+            c.request('POST', path, body=body, headers=headers)
+            r = c.getresponse()
+            raw = r.read()
+            if r.status != 200:
+                raise RuntimeError('HTTP {} {}'.format(r.status, url))
+            return json.loads(raw.decode())
+        except Exception:
+            try:
+                c.close()
+            except Exception:
+                pass
+            (getattr(_CONN, 'pool', None) or {}).pop((u.hostname, port), None)
+            if attempt == 1:
+                raise
 
 
 def load_cached_token(cfg):
@@ -256,11 +686,26 @@ def migrate_old_tokens():
         print('[整理] 已把 {} 个登录缓存文件归纳到 登录缓存/ 文件夹'.format(moved))
 
 
-def ensure_login(cfg):
-    tok, uid = load_cached_token(cfg)
-    if tok:
-        print('[登录] {} 使用缓存 token（1.5h 内）'.format(cfg['name']))
-        return tok, uid
+def drop_cached_token(cfg):
+    """删掉这个账号的 token 缓存。4013/1702（登录失效）后必须清掉再重登，
+    否则 ensure_login 还会从缓存里把那个已经失效的 token 取回来，原地打转。"""
+    tf = TOKEN_TMPL.format(safe_name(cfg['name'] + '_' + cfg['account']))
+    try:
+        if os.path.exists(tf):
+            os.remove(tf)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def ensure_login(cfg, force=False):
+    """force=True 时忽略缓存强制重登（接口返回登录失效后调用）。"""
+    if not force:
+        tok, uid = load_cached_token(cfg)
+        if tok:
+            print('[登录] {} 使用缓存 token（1.5h 内）'.format(cfg['name']))
+            return tok, uid
     pwd_md5 = hashlib.md5(cfg['password'].encode()).hexdigest()
     r = api_json(LOGIN_URL, {'account': cfg['account'], 'password': pwd_md5})
     if r.get('status') != 0:
@@ -275,12 +720,23 @@ def ensure_login(cfg):
     return r['data']['token'], r['data']['uid']
 
 
+def get_devices_from_list(lst):
+    """设备列表响应里的一条 -> 内部用的设备 dict（截图和监控共用一套字段映射）"""
+    return [{'no': d.get('cusdeviceNo'), 'name': d.get('cusdeviceName'),
+             'org': d.get('projectName') or '',
+             'tpl': d.get('templateName') or '',
+             'gw': d.get('deviceName') or '',
+             'addr': d.get('address') or '',
+             'plat_online': d.get('onlineOffline')} for d in lst]
+
+
 def get_devices(tok, uid):
+    """设备列表。一次请求就能把 47~94 台连同页头要的字段全拿回来，
+    所以这里多带几个字段，后面就不用再逐台问「设备信息」（见 dev_meta）。"""
     r = api_json(DEVS_URL, {'pageNum': 1, 'pageSize': 200}, tok)
     if r.get('status') != 0:
         raise RuntimeError('设备列表失败: {}'.format(r))
-    lst = r['data']['cusdeviceResponseDTO']
-    return [{'no': d['cusdeviceNo'], 'name': d['cusdeviceName']} for d in lst]
+    return get_devices_from_list(r['data']['cusdeviceResponseDTO'])
 
 
 def fetch_device_data_api(tok, dev_no):
@@ -292,20 +748,21 @@ def fetch_device_data_api(tok, dev_no):
       rows 每行 [变量ID, 变量名称, 类型, 更新时间, 当前值, 操作]
     注意：lastDataPoint 用的是 dataPointRelId（页面抓包实证），不是 dataPointId。
     """
-    info = api_json(INFO_URL, {'cusdeviceNo': dev_no}, tok).get('data') or {}
-    pts = api_json(POINTS_URL, {
+    info = api_data(api_json(INFO_URL, {'cusdeviceNo': dev_no}, tok), '设备信息') or {}
+    pts = api_data(api_json(POINTS_URL, {
         'dataPointType': '', 'dataPointName': '', 'dataPointIdList': [], 'slaveId': '',
         'cusdeviceNo': dev_no, 'getOperable': 0, 'getTimestampDatas': 1,
         'getLocationDatas': 1, 'getStringDatas': 0, 'getBitDatas': 0,
-        'pageNo': 1, 'pageSize': 500}, tok)
-    plst = (pts.get('data') or {}).get('cusdeviceDataPointList') or []
+        'pageNo': 1, 'pageSize': 500}, tok), '变量定义')
+    plst = (pts or {}).get('cusdeviceDataPointList') or []
 
     last_by_rel = {}
     if plst:
         dps = [{'cusdeviceNo': dev_no, 'dataPointId': p.get('dataPointRelId')}
                for p in plst if p.get('dataPointRelId') is not None]
         if dps:
-            last = api_json(LAST_URL, {'dataPoints': dps}, tok)
+            # 拒绝时 data 可能是空 list、status 却是 5004/5144：必须看 status
+            last = check_status(api_json(LAST_URL, {'dataPoints': dps}, tok), '最新值')
             for r in (last.get('data') or {}).get('list') or []:
                 last_by_rel[r.get('dataPointId')] = r
 
@@ -527,8 +984,13 @@ def tidy_page(pg):
 
 
 def extract_device_data(pg):
-    """从设备详情页提取：设备信息 + 变量概况表"""
-    return pg.evaluate("""() => {
+    """从设备详情页提取：设备信息 + 变量概况表。
+
+    额外回一个 loaded：页面是不是真的打开成了设备详情。
+    「打开正常但这台确实没变量」与「根本没打开 / 被踢回登录页 / 还没渲染完」
+    在 rows 上都是空表，但对用户是两件事：前者是采集异常，后者是没问到。
+    """
+    d = pg.evaluate("""() => {
         const rows = [...document.querySelectorAll('.el-table__row')].map(tr =>
             [...tr.querySelectorAll('td')].map(td => td.innerText.trim()));
         const txt = document.body.innerText;
@@ -538,7 +1000,10 @@ def extract_device_data(pg):
         };
         return { rows: rows, org: pick('所属组织'), tpl: pick('设备模板'),
                  gw: pick('网关'), addr: pick('设备地址') };
-    }""")
+    }""") or {}
+    org = str(d.get('org') or '').strip()
+    d['loaded'] = bool(d.get('rows')) or org not in ('', '--', '-')
+    return d
 
 
 MOBILE_TMPL = """<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -598,7 +1063,7 @@ CARD_TMPL = """<div class="card">
 </div>"""
 
 
-def judge_status(rows, now=None):
+def judge_status(rows, now=None, known=True):
     """判定设备在线状态（关键：不能只看"有没有数值"，必须看数据时间是否新鲜）
 
     平台只保留"最后一次上报值"，设备断线后旧值不会清空，
@@ -607,8 +1072,14 @@ def judge_status(rows, now=None):
     'online'   数据时间在阈值内 -> 在线
     'stale'    有数值但数据时间过旧 -> 离线（显示陈旧数据）
     'offline'  当前值为 '-'，平台明确标记无数据 -> 离线
-    'blank'    变量表未渲染 -> 采集异常
+    'blank'    变量表为空 -> 采集异常
+    'unknown'  **这一轮没问到**（平台拒绝 / 请求失败）-> 不是设备状态，调用方沿用上一轮
+
+    known=False 就是「没问到」：只要没拿到可信的响应，就不要给出任何状态判断。
+    少传这个参数时按已知处理（兼容老调用），但取数路径上必须显式传。
     """
+    if not known:
+        return 'unknown'
     if not rows:
         return 'blank'
     now = now or datetime.now()
@@ -828,6 +1299,7 @@ def render_mobile_cards_pil(dev, data, out_path, status):
     badge_txt, badge_on = {
         'online': ('● 在线', True), 'stale': ('● 离线', False),
         'offline': ('● 离线', False), 'blank': ('● 采集异常', False),
+        'unknown': ('● 未取到', False),      # 没问到，不等于离线
     }.get(status, ('● 未知', False))
     age = data_age_minutes(data.get('rows') or [])
     if status == 'online':
@@ -954,6 +1426,7 @@ def render_mobile_cards(render_pg, dev, data, out_path, status):
         'stale':   ('off', '● 离线'),
         'offline': ('off', '● 离线'),
         'blank':   ('off', '● 采集异常'),
+        'unknown': ('off', '● 未取到'),     # 没问到，别写成离线
     }.get(status, ('off', '● 未知'))
     # 数据时间提示条：离线时明确告知数据是哪一刻的，避免误读为实时值
     age = data_age_minutes(data.get('rows') or [])
@@ -1018,14 +1491,22 @@ def open_device_page(pg, dev, token, state):
     raise RuntimeError('会话失效，两次重注入后仍被跳转到通行证登录页')
 
 
-def shoot(render_pg, dev, data, out_dir):
+def shoot(render_pg, dev, data, out_dir, keep=None):
     """数据已就绪 -> 渲染手机版式 -> 截图（API 与浏览器两种模式共用）
-    状态: 'online' 数据新鲜 / 'stale' 有值但过旧 / 'offline' 无数据 / 'blank' 未渲染
+    状态: 'online' 数据新鲜 / 'stale' 有值但过旧 / 'offline' 无数据 / 'blank' 变量表为空
+          'unknown' 这一轮没问到（页面没打开、平台拒绝），不等于离线
+
+    keep: {设备清洗名: 已存在的文件名}。补跑单台时必须**覆盖同名文件**，
+    不能再生成一个带新时间戳的 png —— 否则批次目录的图片数会比报告多，
+    「报告站点数 = png 数 = zip 内数量」这条对不上。
     """
     rows = data.get('rows') or []
-    status = judge_status(rows)
+    # 浏览器模式下「页面压根没打开成设备详情」也是空表，不能算采集异常
+    status = judge_status(rows, known=data.get('loaded', True))
     age = data_age_minutes(rows)
-    filename = "{}_{}.png".format(datetime.now().strftime("%Y%m%d_%H%M%S"), safe_name(dev['name']))
+    sname = safe_name(dev['name'])
+    filename = (keep or {}).get(sname) or '{}_{}.png'.format(
+        datetime.now().strftime('%Y%m%d_%H%M%S'), sname)
     path = os.path.join(out_dir, filename)
     render_mobile_cards(render_pg, dev, data, path, status)
     vn = '{} 个变量'.format(len(rows))
@@ -1036,11 +1517,15 @@ def shoot(render_pg, dev, data, out_dir):
 
 
 def worker(worker_id, rows, out_dir, token, headless=True, platform_id='W3rfV',
-           browser_mode=False, acc_name=''):
+           browser_mode=False, acc_name='', keep_names=None, prefetched=None,
+           pf_notes=None):
     """单 worker 串行处理分到的设备。
-    API 直调模式（默认）：纯接口拿数据 ~0.3s/台 + Pillow 本地绘图渲染截图（无浏览器）；
+    API 直调模式（默认）：数据已由 prefetch_account 一次取齐，这里只做本地绘图渲染
+    （Pillow 画手机版式，不占平台请求，多线程随便跑）；
     浏览器模式（--browser-mode，需完整 Python 环境装 playwright）：每台重新注入
-    会话打开控制台页（慢，接口异常时保底用）。"""
+    会话打开控制台页（慢，接口异常时保底用）。
+    keep_names：补跑时用来覆盖同名 png（见 shoot 说明）。
+    prefetched：{设备号: data}，None 表示没预取（浏览器模式或单台直取）。"""
     results, errors = [], []
     state = {'ready': False, 'platform_id': platform_id}
     pw = browser = ctx = render_pg = None
@@ -1076,10 +1561,16 @@ def worker(worker_id, rows, out_dir, token, headless=True, platform_id='W3rfV',
                             pg.close()
                         except Exception:
                             pass
+                elif prefetched is not None:
+                    data = prefetched.get(dev['no'])
+                    if not data:
+                        raise RuntimeError((pf_notes or {}).get(dev['no'])
+                                           or '这一台没取到数据（平台拒绝或没权限）')
                 else:
                     data = fetch_device_data_api(token, dev['no'])
-                status, preview, path = shoot(render_pg, dev, data, out_dir)
-                results.append((dev['name'], status, preview, path))
+                status, preview, path = shoot(render_pg, dev, data, out_dir, keep_names)
+                # 带上设备编号：报告合并、补跑定位都按编号，站名可能重名
+                results.append((dev['no'], dev['name'], status, preview, path))
                 tag = STATUS_TAG[status]
                 print('[{}][worker{}] ({}/{}) {} {}'.format(acc_name, worker_id, i + 1, len(rows), tag, dev['name']))
             except Exception as e:
@@ -1116,7 +1607,68 @@ def choose_account(accounts):
         print('输入无效，请重新选择。')
 
 
-def run_for_account(cfg, args, batch_dir):
+def merge_report(old, new_meta):
+    """把本轮条目并进旧报告：按**设备编号**就地替换，其余条目原样保留。
+
+    为什么不能整份覆盖：补跑只跑几台，整份写回去会把没跑的几十台从报告里抹掉，
+    列表和报告就只剩补跑的那几台 —— 正是这次要修的毛病。
+    为什么不能用站名当键：站名会重名（同一工区多个站），按名字会把别人的条目盖掉。
+    顺序：旧条目位置不动，只在末尾追加旧报告里没有的新设备。
+    """
+    base = dict(old or {})
+    devs = [dict(x) for x in (base.get('devices') or [])]
+    idx = {}
+    for i, it in enumerate(devs):
+        no = str(it.get('no') or '').strip()
+        if no:
+            idx[no] = i
+    for it in (new_meta.get('devices') or []):
+        no = str(it.get('no') or '').strip()
+        if no and no in idx:
+            devs[idx[no]] = dict(it)          # 就地替换，位置不变
+        else:
+            devs.append(dict(it))             # 旧报告里没有这台 → 追加到末尾
+            if no:
+                idx[no] = len(devs) - 1
+    out = dict(base)
+    out['devices'] = devs
+    out['account'] = new_meta.get('account') or base.get('account')
+    out['account_name'] = new_meta.get('account_name') or base.get('account_name')
+    out['run_at'] = new_meta.get('run_at') or base.get('run_at')
+    out['merged_at'] = new_meta.get('run_at')
+    # 汇总必须按合并后的条目重算：沿用旧 summary 会出现「总数 47、在线还是 39」
+    cnt = {'total': len(devs), 'online': 0, 'stale': 0, 'offline': 0,
+           'blank': 0, 'unknown': 0}
+    for it in devs:
+        s = it.get('status')
+        if s in cnt:
+            cnt[s] += 1
+    if base.get('summary'):
+        cnt['failed'] = 0        # 合并后旧报告的失败数没有意义，清零
+    out['summary'] = cnt
+    return out
+
+
+def keep_map(out_dir):
+    """补跑时「同名覆盖」要用的对照表：{设备清洗名: 已存在的文件名}
+
+    文件名形如 20261001_153909_18号站点YS2410033-26.png，第三段就是清洗后的
+    设备名。补跑必须复用这个名字，否则批次目录会多出第二张图，
+    「报告条数 = png 张数 = 压缩包里张数」这条对不上。
+    """
+    keep = {}
+    try:
+        for f in os.listdir(out_dir):
+            if f.lower().endswith('.png'):
+                p3 = f[:-4].split('_', 2)
+                if len(p3) == 3:
+                    keep[p3[2]] = f
+    except Exception:
+        return {}
+    return keep
+
+
+def run_for_account(cfg, args, batch_dir, merge=False):
     """单个账号完整跑一遍：登录 -> 取设备 -> 截图 -> 报告 -> 打包"""
     print('\n' + '#' * 70)
     print('# 账号：{}（{}）'.format(cfg['name'], cfg['account']))
@@ -1161,11 +1713,38 @@ def run_for_account(cfg, args, batch_dir):
         buckets[idx % n].append(d)
 
     all_res, all_err = [], []
+    # 补跑要覆盖同名 png（批次目录的图片数不能变多，否则「报告条数 = png 数」对不上）
+    keep_names = {}
+    if merge:
+        keep_names = keep_map(out_dir)
+        print('补跑模式：已有 {} 张截图，同名覆盖'.format(len(keep_names)))
     t0 = time.time()
+    # ---- 数据一次取齐：定义走 10 分钟缓存，最新值整个账号 1 发合批 ----
+    # 平台限流只按请求次数算，逐台 3 发（信息+定义+最新值）×94 台 = 282 发，
+    # 7 线程并发几乎是瞬间连打，正是实测里「第 6 次就被拒」的那种形状。
+    # 这里改成：每台 2 发（且 10 分钟内只发一次）+ 每账号 1 发最新值。
+    prefetched, pf_notes = None, {}
+    if not args.browser_mode:
+        pace_reset()
+        t_pf = time.time()
+        try:
+            prefetched, pf_notes = prefetch_account(cfg, token, devs)
+        except ApiReject as e:
+            print('[平台拒绝] {}：{}'.format(cfg.get('name') or '', e))
+            print('        该账号本轮不出图，界面会显示「没取到」，下一轮/补跑再来')
+            prefetched = {}
+            pf_notes = {d['no']: e.note for d in devs}
+        print('取数：{} 台，请求 {} 次，定义命中缓存 {} 台，没取到 {} 台，用时 {:.1f} 秒'
+              .format(len(devs), _PACE['req'], _PACE['hit'], len(pf_notes),
+                      time.time() - t_pf))
+        for no, why in list(pf_notes.items())[:5]:
+            name = next((d['name'] for d in devs if d['no'] == no), no)
+            print('  没取到 {}：{}'.format(name, why))
     with ThreadPoolExecutor(max_workers=n) as pool:
         futs = [pool.submit(worker, w, buckets[w], out_dir, token,
                             not args.no_headless, cfg.get('platform_id') or 'W3rfV',
-                            args.browser_mode, cfg.get('name') or '')
+                            args.browser_mode, cfg.get('name') or '', keep_names,
+                            prefetched, pf_notes)
                 for w in range(n) if buckets[w]]
         for fut in as_completed(futs):
             _, ok, err = fut.result()
@@ -1173,32 +1752,50 @@ def run_for_account(cfg, args, batch_dir):
             all_err.extend(err)
 
     print('=' * 70)
-    n_on = sum(1 for _, s, _, _ in all_res if s == 'online')
-    n_stale = sum(1 for _, s, _, _ in all_res if s == 'stale')
-    n_off = sum(1 for _, s, _, _ in all_res if s == 'offline')
-    n_blank = sum(1 for _, s, _, _ in all_res if s == 'blank')
+    n_on = sum(1 for _, _, s, _, _ in all_res if s == 'online')
+    n_stale = sum(1 for _, _, s, _, _ in all_res if s == 'stale')
+    n_off = sum(1 for _, _, s, _, _ in all_res if s == 'offline')
+    n_blank = sum(1 for _, _, s, _, _ in all_res if s == 'blank')
+    n_unknown = sum(1 for _, _, s, _, _ in all_res if s == 'unknown')
     report = []
-    for name, status, preview, path in sorted(all_res, key=lambda x: x[0]):
+    for no, name, status, preview, path in sorted(all_res, key=lambda x: x[1]):
         tag = STATUS_TAG[status]
         print('[{}][{}] {}'.format(cfg.get('name'), tag, name))
         print('      内容: {}'.format(preview))
         m = re.search(r'数据(.+)$', preview or '')
-        report.append({'name': name, 'status': status,
+        report.append({'no': no, 'name': name, 'status': status,
                        'file': os.path.basename(path), 'preview': preview,
-                       'age': m.group(1) if m else ''})
+                       'age': m.group(1) if m else '',
+                       # 截图时刻单独记：补跑覆盖同名文件时，文件名里的时间不会变，
+                       # 列表要靠这个字段才能显示新的「截图时间」
+                       'at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
     for name, e in sorted(all_err):
         print('[✗失败] {} :: {}'.format(name, e))
     print('=' * 70)
-    print('完成：成功 {} 个（在线 {}，离线-陈旧数据 {}，离线-无数据 {}，采集异常 {}）；失败 {} 个；耗时 {:.0f}s'.format(
-        len(all_res), n_on, n_stale, n_off, n_blank, len(all_err), time.time() - t0))
+    print('完成：成功 {} 个（在线 {}，离线-陈旧数据 {}，离线-无数据 {}，采集异常 {}，未取到 {}）；'
+          '失败 {} 个；耗时 {:.0f}s'.format(
+              len(all_res), n_on, n_stale, n_off, n_blank, n_unknown,
+              len(all_err), time.time() - t0))
     print('截图目录: {}'.format(out_dir))
 
     report_meta = {'account': cfg['account'], 'account_name': cfg['name'],
                    'run_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                    'summary': {'total': len(all_res), 'online': n_on, 'stale': n_stale,
-                               'offline': n_off, 'blank': n_blank, 'failed': len(all_err)},
+                               'offline': n_off, 'blank': n_blank,
+                               'unknown': n_unknown, 'failed': len(all_err)},
                    'devices': report}
-    json.dump(report_meta, open(os.path.join(out_dir, '巡站报告.json'), 'w', encoding='utf-8'),
+    rp = os.path.join(out_dir, '巡站报告.json')
+    if merge:
+        old = None
+        try:
+            old = json.load(open(rp, encoding='utf-8'))
+        except Exception:
+            old = None
+        before = len((old or {}).get('devices') or [])
+        report_meta = merge_report(old, report_meta)
+        print('报告合并：原有 {} 条 + 本轮 {} 条 → 合并后 {} 条（按设备编号替换，其余保留）'
+              .format(before, len(report), len(report_meta['devices'])))
+    json.dump(report_meta, open(rp, 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
 
     return out_dir, len(all_res)

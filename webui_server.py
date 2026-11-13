@@ -270,6 +270,47 @@ def _zip_of_batch(name):
     return os.path.join(BASE, '有人云巡站截图_{}.zip'.format(name[:-len('_截图')]))
 
 
+# 「没数据」的口径：报告里状态是离线 / 采集异常 / 未取到，或者对应 png 不见了。
+# 数据陈旧算有数据 —— 它只是旧，不是没有。
+EMPTY_STATUS = ('offline', 'blank', 'unknown')
+
+
+def _empty_devices():
+    """统计上一批里「没数据」的站点，按账号分组，键是批次里的账号目录名。
+
+    只读报告 + 磁盘，不请求平台：一次点击就能立刻告诉用户「有几台要补」。
+    """
+    b = _latest_batch()
+    if not b:
+        return {'batch': None, 'by_acc': {}, 'total': 0}
+    by_acc = {}
+    try:
+        entries = sorted(os.listdir(b))
+    except Exception:
+        entries = []
+    for aname in entries:
+        adir = os.path.join(b, aname)
+        if not os.path.isdir(adir):
+            continue
+        try:
+            meta = json.load(open(os.path.join(adir, '巡站报告.json'), encoding='utf-8'))
+        except Exception:
+            continue
+        nos = []
+        for it in (meta.get('devices') or []):
+            no = str(it.get('no') or '').strip()
+            if not no:
+                continue          # 老报告没有编号：没法按编号补跑，跳过（不猜站名）
+            f = str(it.get('file') or '')
+            miss = bool(f) and not os.path.isfile(os.path.join(adir, f))
+            if it.get('status') in EMPTY_STATUS or miss:
+                nos.append(no)
+        if nos:
+            by_acc[aname] = nos
+    return {'batch': os.path.basename(b), 'by_acc': by_acc,
+            'total': sum(len(v) for v in by_acc.values())}
+
+
 def _batch_rows():
     """列出工具目录下的往期截图批次（含大小 / 张数 / 对应压缩包）"""
     rows = []
@@ -548,17 +589,23 @@ def _row_enabled(r):
 
 # ---------------- 巡站执行 ----------------
 
-def _runner(sel, device_nos):
-    ST.update(running=True, error=None, results={}, wprog={}, acc_done=0,
-              total=0, stage='', batch=None, zip=None, done=None, finished=None)
+def _runner(sel, device_nos, only_empty=False, batch=None):
+    ST.update(running=True, error=None, wprog={}, acc_done=0,
+              total=0, stage='', done=None, finished=None)
+    # ★ 补跑时**不能**清空 results：页面上的列表要一直是全部站点，
+    #   清掉就只剩补跑的那几台了（正是这次要修的毛病）。
+    if not only_empty:
+        ST.update(results={}, batch=None, zip=None)
+    ST['only_empty'] = bool(only_empty)
     ST['logs'] = []
     R._PAUSE_EVENT.set()
     try:
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        batch = os.path.join(BASE, stamp + '_截图')
+        # 补跑复用传入的批次目录：新建批次会让列表和报告只剩补跑的那几台
+        batch = batch or os.path.join(BASE, stamp + '_截图')
         os.makedirs(batch, exist_ok=True)
         ST['batch'] = batch
-        print('批次目录: {}'.format(batch))
+        print('批次目录: {}{}'.format(batch, '（补跑，沿用原批次）' if only_empty else ''))
 
         args = SimpleNamespace(limit=0, workers=ST.get('workers') or R.WORKERS,
                                browser_mode=False, no_headless=False, multi=len(sel) > 1)
@@ -586,7 +633,7 @@ def _runner(sel, device_nos):
                 ST['total'] += n_dev
             except Exception:
                 pass
-            out_dir, ok = R.run_for_account(cfg2, args, batch)
+            out_dir, ok = R.run_for_account(cfg2, args, batch, merge=only_empty)
             total_ok += ok
             ST['acc_done'] += ok
             rp = os.path.join(out_dir, '巡站报告.json')
@@ -598,7 +645,10 @@ def _runner(sel, device_nos):
                 print('[警告] 报告读取失败: {}'.format(e))
 
         if total_ok > 0:
-            zp = os.path.join(BASE, '有人云巡站截图_{}.zip'.format(stamp))
+            # 补跑要重打**同名** zip：换名字会在目录里多出一个包，
+            # 用户看到两个「同一批」的压缩包更糊涂
+            zp = (_zip_of_batch(os.path.basename(batch)) if only_empty
+                  else os.path.join(BASE, '有人云巡站截图_{}.zip'.format(stamp)))
             R.make_zip(batch, zp)
             ST['zip'] = zp
             print('压缩包: {}'.format(zp))
@@ -624,6 +674,100 @@ def _runner(sel, device_nos):
         ST['stage'] = ''
         R._PAUSE_EVENT.set()
         ST['finished'] = time.time()
+
+
+# ---------------- 单站重拍（截图弹窗里的「⟳ 重新获取这张截图」） ----------------
+
+# 一次只允许一台在拍，状态放这里让前端轮询。
+# 不占 ST['running']：重拍只是补一张图，不该让整页显示「正在跑全部账号」，
+# 也不该被「已经在跑了」挡住——两件事互不影响，各自有各自的锁。
+RESHOT = {'no': '', 'busy': False, 'stage': '', 'err': '', 'file': '',
+          'at': '', 'status': '', 'preview': '', 'batch': ''}
+
+
+def _batch_report(batch_name):
+    """[(账号目录名, 报告 dict), ...]；批次目录不存在就返回空表"""
+    b = os.path.join(BASE, batch_name or '')
+    if not batch_name or not os.path.isdir(b):
+        return []
+    out = []
+    try:
+        names = sorted(os.listdir(b))
+    except Exception:
+        return []
+    for aname in names:
+        adir = os.path.join(b, aname)
+        if not os.path.isdir(adir):
+            continue
+        try:
+            meta = json.load(open(os.path.join(adir, '巡站报告.json'), encoding='utf-8'))
+        except Exception:
+            continue
+        out.append((aname, meta))
+    return out
+
+
+def _find_shot(dev_no, batch_name=None):
+    """按设备编号定位：在哪个批次、哪个账号目录、报告里哪一条。
+
+    ★ 只认编号。站名会重（同一条线好几个站叫「变电所」），按站名找会摸到别台机器，
+      重拍就拍成了别的站——那比拍失败更糟。
+    """
+    dev_no = str(dev_no or '').strip()
+    if not dev_no:
+        return None
+    batch_name = batch_name or os.path.basename(_latest_batch() or '')
+    for aname, meta in _batch_report(batch_name):
+        for it in (meta.get('devices') or []):
+            if str(it.get('no') or '').strip() == dev_no:
+                return {'batch': batch_name, 'acc_dir': aname, 'entry': it}
+    return None
+
+
+def _reshot_worker(dev_no, batch_name):
+    try:
+        RESHOT.update(busy=True, no=dev_no, err='', stage='定位账号…',
+                      batch=batch_name, file='', at='', status='', preview='')
+        hit = _find_shot(dev_no, batch_name)
+        if not hit:
+            raise RuntimeError('这一批的报告里没有设备 {}，可能批次已被清理'.format(dev_no))
+        cfg = None
+        for a in R.load_accounts():
+            if R.safe_name(a['name']) == hit['acc_dir']:
+                cfg = dict(a)
+                break
+        if cfg is None:
+            raise RuntimeError('账号目录「{}」在 accounts.csv 里找不到'.format(hit['acc_dir']))
+        cfg['device_nos'] = [dev_no]          # 只跑这一台，其余站一张图都不动
+        args = SimpleNamespace(limit=0, workers=1, browser_mode=False,
+                               no_headless=False, multi=False)
+        RESHOT['stage'] = '取数据并截图…'
+        out_dir, ok = R.run_for_account(cfg, args, os.path.join(BASE, batch_name), merge=True)
+        if not ok:
+            # 关键：这一轮没拍成时**不写报告、不删旧图**，界面继续显示原来那张
+            raise RuntimeError('这台这次没截到图（平台没给数据），旧图原样保留')
+        ent = None
+        for it in (json.load(open(os.path.join(out_dir, '巡站报告.json'),
+                                  encoding='utf-8')).get('devices') or []):
+            if str(it.get('no') or '').strip() == str(dev_no).strip():
+                ent = it
+        if not ent:
+            raise RuntimeError('重拍后报告里仍找不到这台，旧图原样保留')
+        # 压缩包跟着重打：不重打的话包里还是旧图，用户解压看到的和界面对不上
+        zp = _zip_of_batch(batch_name)
+        if os.path.isfile(zp):
+            RESHOT['stage'] = '重打压缩包…'
+            R.make_zip(os.path.join(BASE, batch_name), zp)
+        RESHOT.update(stage='', file=ent.get('file') or '', at=ent.get('at') or '',
+                      status=ent.get('status') or '', preview=ent.get('preview') or '')
+        print('[重拍] {} 完成：{}'.format(ent.get('name') or dev_no, RESHOT['file']))
+    except Exception as e:
+        RESHOT['err'] = str(e)[:200]
+        print('[重拍失败] {} :: {}'.format(dev_no, RESHOT['err']))
+    finally:
+        RESHOT['busy'] = False
+        RESHOT['stage'] = ''
+        # 不碰 R._PAUSE_EVENT：整批跑可能正被用户暂停着，重拍一张图不该把它偷偷恢复
 
 
 # ---------------- HTTP ----------------
@@ -746,6 +890,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(WATCHER.catalog())
             if name == 'batches':
                 return self._batches()
+            if name == 'emptycount':
+                # 「只跑没数据的 N 台」按钮上的数字：只读报告和磁盘，不请求平台，
+                # 所以页面每次刷新调它都不会给账号惹上频率限制
+                return self._json(dict(ok=True, **_empty_devices()))
+            if name == 'reshotstat':
+                return self._json(dict(ok=True, **RESHOT))
+            if name == 'shotof':
+                # 重拍完成后只回这一台的报告条目（纯读磁盘，不再去敲平台）
+                hit = _find_shot(qs.get('no', [''])[0], qs.get('batch', [''])[0] or None)
+                if not hit:
+                    return self._err('报告里没有这台')
+                return self._json({'ok': True, 'entry': hit['entry'],
+                                   'acc_dir': hit['acc_dir'], 'batch': hit['batch']})
         except Exception as e:
             return self._err('{}'.format(e), 500)
         self._err('unknown api', 404)
@@ -826,6 +983,8 @@ class Handler(BaseHTTPRequestHandler):
                                    'notify_mode': ST.get('notify_mode', 'both')})
             if name == 'addaccount':
                 return self._addaccount(body)
+            if name == 'reshot':
+                return self._reshot(body)
             if name == 'batchdel':
                 return self._batchdel(body)
             if name == 'histdel':
@@ -989,15 +1148,19 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     live = {}
                 if live:
+                    # 键必须是英文：st['status'] 是中文（在线/数据陈旧/离线/采集异常），
+                    # 以前直接拿中文去比对英文键，永远对不上，整批都落进 offline。
                     cnt = {'total': 0, 'online': 0, 'stale': 0,
-                           'offline': 0, 'blank': 0}
+                           'offline': 0, 'blank': 0, 'unknown': 0}
+                    CNT_KEY = {'在线': 'online', '数据陈旧': 'stale',
+                               '离线': 'offline', '采集异常': 'blank'}
                     for st in live.values():
                         cnt['total'] += 1
-                        k = st.get('status')
-                        if k in cnt:
-                            cnt[k] += 1
-                        else:
-                            cnt['offline'] += 1
+                        if st.get('note'):
+                            cnt['unknown'] += 1      # 这一轮没问到平台，不算离线
+                            continue
+                        k = CNT_KEY.get(st.get('status'))
+                        cnt[k if k else 'unknown'] += 1
                     wst = WATCHER.status() or {}
                     ts = wst.get('last_run')
                     item['last'] = {
@@ -1005,7 +1168,7 @@ class Handler(BaseHTTPRequestHandler):
                                    if ts else None),
                         'total': cnt['total'], 'online': cnt['online'],
                         'stale': cnt['stale'], 'offline': cnt['offline'],
-                        'blank': cnt['blank'],
+                        'blank': cnt['blank'], 'unknown': cnt['unknown'],
                         'src': 'live',
                     }
             out.append(item)
@@ -1169,7 +1332,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _attach_shots(self, aname, devs):
         """把最新批次中该账号的截图与巡站报告匹配到各设备。
-        截图文件名形如 20261001_153909_林东接触网工区YS2410033-26.png（时间_时间戳_设备完整名称），
+        截图文件名形如 20261001_153909_18号站点YS2410033-26.png（时间_时间戳_设备完整名称），
         平台的 no 是内部编号（0000049399000740），不出现在文件名里，必须按设备 name 匹配。
         匹配两级：全名（清洗后）→ 设备编号（名称里的 YSxxxxxxx-x，平台改名后仍能对上）。
         状态/数据年龄来自同目录 巡站报告.json（get_devices 接口不返回状态，不能凭空猜）。"""
@@ -1233,7 +1396,10 @@ class Handler(BaseHTTPRequestHandler):
                     break
             if it:
                 st = {'online': '在线', 'stale': '数据陈旧',
-                      'offline': '离线', 'blank': '采集异常'}.get(it.get('status'))
+                      'offline': '离线', 'blank': '采集异常',
+                      # 从来没问到过的：不写「未巡」，那会被看成"还没跑"，
+                      # 而事实是跑了但平台没给数据 —— 这两个在补跑列表里都算「没数据」
+                      'unknown': '未取到'}.get(it.get('status'))
                 if st:
                     d['status'] = st
                 age = it.get('age')
@@ -1282,6 +1448,9 @@ class Handler(BaseHTTPRequestHandler):
                 d['live'] = True
                 d['watch_ts'] = s['ts']
                 d['points'] = s.get('n_points', 0)
+                # 这一轮没问到平台时的原因（如「平台拒绝:无该设备数据权限」）。
+                # status 保持上一轮的判定不变 —— 没问到不等于设备离线。
+                d['note'] = s.get('note') or ''
                 d['anoms'] = [{'name': a.get('rule_name'), 'level': a.get('level'),
                                'val': a.get('val'), 'cond': a.get('cond'),
                                'since': a.get('since'), 'dur': a.get('duration_min')}
@@ -1321,6 +1490,8 @@ class Handler(BaseHTTPRequestHandler):
         vals = varsort.order(vals, name_of=lambda x: x['name'])
         self._json({'ok': True, 'status': s['status'], 'age': R.fmt_age(s['age_min']),
                     'newest': s.get('newest'), 'ts': s['ts'], 'n_points': s.get('n_points'),
+                    # 没问到平台的设备：数值是上一轮的，原因单独给，别让界面显示成实时值
+                    'note': s.get('note') or '',
                     'anoms': s.get('anoms') or [], 'vals': vals})
 
     def _watchhist(self, qs):
@@ -1377,14 +1548,31 @@ class Handler(BaseHTTPRequestHandler):
         self._json({'ok': True, 'report': rep['report'],
                     'dir': os.path.relpath(rep['dir'], BASE)})
 
+    def _reshot(self, body):
+        """重拍一台的截图。HTTP 立刻返回，真正的活在后台线程里干，前端轮询进度。"""
+        dev_no = str(body.get('no') or '').strip()
+        if not dev_no:
+            return self._err('没给设备编号')
+        if RESHOT.get('busy'):
+            return self._err('上一张还在重拍（{}），等它跑完再点'.format(RESHOT.get('no') or ''))
+        batch = str(body.get('batch') or '').strip()
+        if batch and not BATCH_PAT.match(batch):
+            return self._err('批次名不合法')
+        hit = _find_shot(dev_no, batch or None)
+        if not hit:
+            return self._err('这一批的报告里没有这个设备，没法重拍')
+        if ST.get('running'):
+            # 整批在跑时两边会同时写同一个 巡站报告.json，谁后写谁赢，
+            # 结果就是「刚重拍的那张又变回旧的」。宁可明确拒绝，也不做这种半截事。
+            return self._err('整批截图正在跑，等它跑完再单张重拍（两边同时写报告会互相覆盖）')
+        threading.Thread(target=_reshot_worker, args=(dev_no, hit['batch']),
+                         daemon=True).start()
+        return self._json({'ok': True, 'no': dev_no, 'batch': hit['batch'],
+                           'name': hit['entry'].get('name') or ''})
+
     def _run(self, body):
         if ST['running']:
             return self._err('已经在跑了')
-        names = body.get('names') or []
-        accs = R.load_accounts()
-        sel = [a for a in accs if a['name'] in names]
-        if not sel:
-            return self._err('没有勾选任何账号')
         # 请求带了合法值（1–8）才覆盖；带空 / 带错 / 超范围一律保留已保存的设置。
         # 旧写法是 int(body.get('workers') or R.WORKERS)：请求里没带或带 0 时
         # 会悄悄把用户存好的值改回默认 4 —— 「设置没生效」的观感就是这么来的。
@@ -1394,6 +1582,32 @@ class Handler(BaseHTTPRequestHandler):
             w = 0
         if 1 <= w <= 8:
             ST['workers'] = w
+
+        if body.get('only_empty'):
+            # 只补跑上一批里「没数据」的那些站：复用原批次目录，不新建
+            info = _empty_devices()
+            if not info['total']:
+                return self._err('上一批里没有「没数据」的站点，不用补跑')
+            accs = R.load_accounts()
+            # 报告里的目录名是 safe_name(账号名)，这里要按同一套规则对回去
+            pair = [(a, R.safe_name(a['name'])) for a in accs]
+            sel = [a for a, s in pair if s in info['by_acc']]
+            if not sel:
+                return self._err('补跑目标账号不在 accounts.csv 里，请检查账号是否被删')
+            device_nos = {a['name']: info['by_acc'][s] for a, s in pair if s in info['by_acc']}
+            threading.Thread(target=_runner,
+                             args=(sel, device_nos),
+                             kwargs={'only_empty': True,
+                                     'batch': os.path.join(BASE, info['batch'])},
+                             daemon=True).start()
+            return self._json({'ok': True, 'only_empty': True,
+                               'total': info['total'], 'batch': info['batch']})
+
+        names = body.get('names') or []
+        accs = R.load_accounts()
+        sel = [a for a in accs if a['name'] in names]
+        if not sel:
+            return self._err('没有勾选任何账号')
         threading.Thread(target=_runner, args=(sel, body.get('device_nos') or {}),
                          daemon=True).start()
         self._json({'ok': True})
@@ -1417,6 +1631,7 @@ class Handler(BaseHTTPRequestHandler):
                     'error': ST['error'],
                     'batch': os.path.relpath(b, BASE) if b else None,
                     'zip': os.path.relpath(ST['zip'], BASE) if ST['zip'] else None,
+                    'only_empty': bool(ST.get('only_empty')),
                     'done': ST['done']})
 
     def _open(self, rel):

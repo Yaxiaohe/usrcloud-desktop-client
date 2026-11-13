@@ -49,8 +49,23 @@ RATE_PER_SEC = 3.0              # 令牌桶平均速率（请求/秒）
 RATE_BURST = 5                  # 令牌桶突发上限
 CONCURRENCY = 3                 # 巡检并发数（默认值；设置页的「并发线程」可覆盖，见 set_concurrency）
 LIST_TTL = 3600                 # 设备列表缓存时长（秒）
-BACKOFF_429 = 1800              # 触发风控后的暂停时长（秒）
+# 设备信息 / 变量定义缓存时长（秒）。实测平台限流**只按请求次数算**，
+# 不按点数（同一台 14 个点每 3 秒一发，第 6 次就被拒；全账号 1054 点打包成一发，
+# 每 3 秒一发 15 连发全过）。所以省请求的唯一办法是「该发的少发」：
+# 这两样几乎不变（定义只在增减变量时变），没必要每轮每台都问一遍。
+# 离线判定完全靠最新值的时间戳（judge_status 只读 rows），不依赖这两个接口，
+# 缓存只影响「新加的变量最晚多久能看到」。
+#
+# 时长必须**比一轮巡检长**，否则每轮都过期、一次都命中不了，等于没做缓存：
+# 默认 15 分钟一轮，这里给 30 分钟（两轮命中一次）。规则里 def_ttl 可覆盖，
+# 但覆盖值仍不能短于一轮间隔 —— 见 _def_ttl()。
+DEF_TTL = 1800
+THROTTLE_COOL = 20              # 平台返回 5144（请求频率超限）后的冷却秒数；实测约 20 秒恢复
+THROTTLE_COOL_MAX = 60          # 冷却上限，规则里配大了也不越过
+BACKOFF_429 = 60                # 触发风控后的暂停秒数（旧值 1800 = 半小时，等于整轮放弃，
+                                # 而平台实测 20 秒就恢复，白等半小时的代价是监控数据整段缺失）
 MAX_BACKOFF = 3600              # 连续失败的最大退避（秒）
+LAST_CHUNK = 2000               # lastDataPoint 合批单次最多多少个点（平台单页上限量级）
 
 STATUS_LEVEL = {'离线': 'critical', '数据陈旧': 'critical',
                 '采集异常': 'warn', '在线': 'ok'}
@@ -153,11 +168,27 @@ class RateLimiter:
 
 
 class ApiError(Exception):
-    """带风控标记的接口错误"""
+    """带风控标记的接口错误。
 
-    def __init__(self, msg, throttled=False):
+    除了「是不是限流」，还要带上是**哪一类**失败（note/kind）：
+    平台拒绝要显示成「无该设备数据权限」这种事由，而不是把设备写成离线。
+    """
+
+    def __init__(self, msg, throttled=False, note='', kind='', reject=None):
         super().__init__(msg)
         self.throttled = throttled
+        self.note = note            # 给界面的短原因（如「平台拒绝:请求频率超限」）
+        self.kind = kind            # throttle / noperm / nodev / auth / other
+        self.reject = reject        # 原始 R.ApiReject（有 status 等细节）
+
+    @property
+    def auth(self):
+        return self.kind == 'auth'
+
+    @property
+    def whole_account(self):
+        """影响整个账号（限流 / 登录失效），不是某一台设备的问题"""
+        return self.kind in ('throttle', 'auth')
 
 
 class WatchEngine:
@@ -183,6 +214,10 @@ class WatchEngine:
         self._notify_lock = threading.Lock()
         self._notify_events = []     # 新异常/恢复通知事件（给 Electron 壳轮询做系统提醒）
         self._counters = {'requests': 0, 'reset_at': time.time()}
+        # 平台限流冷却：5144 之后一段时间内**一个请求都不发**，否则越撞越久
+        self._cool_until = 0.0
+        self._login_lock = threading.Lock()   # 登录失效时，多线程只重登一次
+        self._last_relogin = {}               # 账号 -> 上次强制重登时间
 
         self._devices = {}           # dev_key -> 设备实时状态
         self._prev_status = {}       # dev_key -> 上一轮状态文本
@@ -191,7 +226,10 @@ class WatchEngine:
         self._new_anoms = []         # 本轮新出现的异常（id 列表）
         self._recovered = []         # 本轮恢复的（设备名 + 说明）
         self._list_cache = {}        # 账号名 -> (取到的时间, 设备列表)
-        self._pts_cache = {}         # dev_key -> (取到的时间, 变量点定义)
+        # 变量定义与截图侧共用同一份内存 + 同一个落盘文件：
+        # 监控跑过一轮之后，点「开始截图」第一次就能全命中，不用再拉 47~94 发。
+        self._pts_cache = R._PTS_CACHE   # acc|dev -> (取到的时间, 变量点定义)
+        self._info_cache = {}        # acc|dev -> (取到的时间, 设备元信息)
         self._hist_cache = {}        # (acc,no,hours,want) -> (取到的时间, 响应)
         self._rec_val = {}          # (设备编号,变量) -> 已落盘的最新值（去重+心跳用，内存态）
         self._rec_ep = {}            # (设备编号,变量) -> 上次落盘墙钟时间(time.time()，心跳间隔判据)
@@ -364,7 +402,11 @@ class WatchEngine:
         return self._scope
 
     def _get_devices(self, cfg, tok, uid, force=False):
-        """带 TTL 缓存的设备列表"""
+        """带 TTL 缓存的设备列表。
+
+        多带几个字段（组织/模板/网关/地址/平台在线位）：设备列表接口同一个响应里
+        就有这些，带着它们后面就不用为「页头那几行字」逐台再发请求了。
+        """
         nm = cfg['name']
         hit = self._list_cache.get(nm)
         if hit and not force and time.time() - hit[0] < LIST_TTL:
@@ -375,46 +417,142 @@ class WatchEngine:
         if r.get('status') != 0:
             raise ApiError('设备列表失败: {}'.format(str(r)[:150]))
         lst = (r.get('data') or {}).get('cusdeviceResponseDTO') or []
-        devs = [{'no': d.get('cusdeviceNo'), 'name': d.get('cusdeviceName')} for d in lst]
+        devs = R.get_devices_from_list(lst)
         self._list_cache[nm] = (time.time(), devs)
         return devs
 
-    # ---------------- 单台取数（自带限速） ----------------
+    # ---------------- 取数（自带限速 / 冷却 / 拒绝分类） ----------------
 
-    def _api(self, url, payload, tok):
-        """过限速 + 计数的接口调用"""
+    def _api(self, url, payload, tok, what=''):
+        """过冷却 + 限速 + 计数的接口调用。status 不是 0 一律抛 ApiError（带分类）。
+
+        以前这里不看 status，直接把 data 取出来：平台回 5144（限流）或 5004/42013
+        （无权限）时 data 是 null 或空 list，外形和「设备真没数据」一模一样，
+        于是整批设备被写成「离线」—— 这就是现场那个「有数据却显示离线」的来源。
+        """
+        self._check_cool()
         self._limiter.acquire(self._stop)
         self._counters['requests'] += 1
         try:
-            return R.api_json(url, payload, tok)
+            resp = R.api_json(url, payload, tok)
         except Exception as e:
             txt = repr(e)
             throttled = any(k in txt for k in ('429', '403', 'Too Many', '频繁', 'forbidden'))
-            raise ApiError(txt[:160], throttled=throttled)
+            if throttled:
+                self._cool_down('HTTP 层限流')
+            raise ApiError(txt[:160], throttled=throttled,
+                           note=('平台拒绝:请求频率超限' if throttled else ''),
+                           kind=('throttle' if throttled else 'transport'))
+        st = (resp or {}).get('status')
+        if st is None or str(st) != '0':
+            try:
+                st = int(st)
+            except (TypeError, ValueError):
+                pass
+            rej = R.ApiReject(st, what, resp)
+            if rej.throttled:
+                self._cool_down('平台返回 5144')
+            raise ApiError(str(rej), throttled=rej.throttled, note=rej.note,
+                           kind=rej.kind, reject=rej)
+        return resp
 
-    def _fetch_device(self, dev_no, tok):
-        """三步取数，返回 rows（与 run_usrcloud 一致）"""
-        info = (self._api(R.INFO_URL, {'cusdeviceNo': dev_no}, tok) or {}).get('data') or {}
-        pts = self._api(R.POINTS_URL, {
+    # ---- 平台限流冷却（5144）----
+
+    def _throttle_seconds(self):
+        """冷却时长：默认 20 秒；规则里配了就按规则（夹在 20~60 之间）"""
+        try:
+            v = float(self.rules.get('throttle_cool') or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v <= 0:
+            v = float(THROTTLE_COOL)
+        return max(THROTTLE_COOL, min(THROTTLE_COOL_MAX, v))
+
+    def _check_cool(self):
+        """冷却期内一个请求都不发 —— 撞得越勤，平台锁得越久。"""
+        left = self._cool_until - time.time()
+        if left > 0:
+            raise ApiError('平台限流冷却中（还剩 {:.0f} 秒），本轮不再发请求'.format(left),
+                           throttled=True, note='平台拒绝:请求频率超限', kind='throttle')
+
+    def _cool_down(self, why=''):
+        sec = self._throttle_seconds()
+        self._cool_until = max(self._cool_until, time.time() + sec)
+        self.state['paused_reason'] = '平台限流，暂停请求至 {}（{}）'.format(
+            datetime.fromtimestamp(self._cool_until).strftime('%H:%M:%S'), why or '5144')
+        self._say(self.state['paused_reason'])
+
+    def _relogin(self, cfg):
+        """登录失效（4013/1702）：清掉缓存重登一次。多线程同时撞上时只登一次。"""
+        with self._login_lock:
+            hit = self._last_relogin.get(cfg['name'])
+            if hit and time.time() - hit < 10:
+                tok, _uid = R.ensure_login(cfg)
+                return tok
+            R.drop_cached_token(cfg)
+            tok, _uid = R.ensure_login(cfg, force=True)
+            self._last_relogin[cfg['name']] = time.time()
+            self._say('{} 登录失效，已重新登录'.format(cfg['name']))
+            return tok
+
+    def _fetch_info_points(self, dev_no, tok):
+        """设备元信息 + 变量点定义（一台 2 发）。这两步平台没有合批能力。"""
+        info = R.api_data(self._api(R.INFO_URL, {'cusdeviceNo': dev_no}, tok, '设备信息'),
+                          '设备信息') or {}
+        pts = R.api_data(self._api(R.POINTS_URL, {
             'dataPointType': '', 'dataPointName': '', 'dataPointIdList': [], 'slaveId': '',
             'cusdeviceNo': dev_no, 'getOperable': 0, 'getTimestampDatas': 1,
             'getLocationDatas': 1, 'getStringDatas': 0, 'getBitDatas': 0,
-            'pageNo': 1, 'pageSize': 500}, tok)
-        plst = (pts.get('data') or {}).get('cusdeviceDataPointList') or []
+            'pageNo': 1, 'pageSize': 500}, tok, '变量定义'), '变量定义')
+        return info, ((pts or {}).get('cusdeviceDataPointList') or [])
 
-        last_by_rel = {}
-        if plst:
-            dps = [{'cusdeviceNo': dev_no, 'dataPointId': p.get('dataPointRelId')}
-                   for p in plst if p.get('dataPointRelId') is not None]
-            if dps:
-                last = self._api(R.LAST_URL, {'dataPoints': dps}, tok)
-                for r in (last.get('data') or {}).get('list') or []:
-                    last_by_rel[r.get('dataPointId')] = r
+    def _last_once(self, pairs, tok):
+        """一发合批取最新值。pairs=[(设备号, relId)]，返回 {(设备号, relId): 返回项}。
 
+        实测返回项里带 cusdeviceNo，所以按 (设备号, relId) 索引；
+        万一是老接口不带设备号，退回 (None, relId)（relId 全局唯一，单批内也不冲突）。
+        """
+        payload = {'dataPoints': [{'cusdeviceNo': no, 'dataPointId': rid}
+                                  for no, rid in pairs]}
+        data = R.api_data(self._api(R.LAST_URL, payload, tok, '最新值'), '最新值') or {}
+        got = {}
+        for it in (data.get('list') or []):
+            no = it.get('cusdeviceNo')
+            rid = it.get('dataPointId')
+            got[(str(no), rid) if no is not None else (None, rid)] = it
+        return got
+
+    def _last_batch(self, pairs, tok):
+        """按 2000 点分片合批取最新值，返回 ({key: item}, {设备号: 原因})。"""
+        out, failed = {}, {}
+        for i in range(0, len(pairs), LAST_CHUNK):
+            self._last_chunk(pairs[i:i + LAST_CHUNK], tok, out, failed)
+        return out, failed
+
+    def _last_chunk(self, chunk, tok, out, failed, depth=0):
+        """发一片。被拒时二分拆小定位 —— 一台没权限不该拖垮整批 94 台。"""
+        try:
+            out.update(self._last_once(chunk, tok))
+            return
+        except ApiError as e:
+            if e.whole_account or len(chunk) <= 1 or depth >= 8:
+                for no, _rid in chunk:
+                    failed.setdefault(no, e.note or str(e)[:60])
+                if e.whole_account:
+                    raise          # 限流/登录失效：整账号都别继续了，上层统一处理
+                return
+            mid = len(chunk) // 2
+            self._last_chunk(chunk[:mid], tok, out, failed, depth + 1)
+            self._last_chunk(chunk[mid:], tok, out, failed, depth + 1)
+
+    @staticmethod
+    def _rows_from(dev_no, plst, last_map):
+        """把变量定义 + 最新值拼成 rows（格式与 run_usrcloud 完全一致）"""
         rows = []
         for p in plst:
             unit = (p.get('unit') or '').strip()
-            r = last_by_rel.get(p.get('dataPointRelId'))
+            rid = p.get('dataPointRelId')
+            r = last_map.get((str(dev_no), rid)) or last_map.get((None, rid))
             tm, cur = '-', '-'
             if r:
                 ts = r.get('time')
@@ -428,7 +566,22 @@ class WatchEngine:
                     cur = '{} {}'.format(val, unit).strip() if unit else val
             rows.append([str(p.get('dataPointId') or ''), p.get('name') or '', '',
                          tm, cur, ''])
-        return rows, info
+        return rows
+
+    def _fetch_device(self, dev_no, tok):
+        """单台三步取数（手动获取 / 单台刷新用）。
+
+        批量巡检不再走这里 —— 那边 info+points 逐台、最新值按账号合批，
+        94 台从 282 发降到 189 发左右。
+        """
+        info, plst = self._fetch_info_points(dev_no, tok)
+        last_map = {}
+        if plst:
+            pairs = [(dev_no, p.get('dataPointRelId')) for p in plst
+                     if p.get('dataPointRelId') is not None]
+            if pairs:
+                last_map, _failed = self._last_batch(pairs, tok)
+        return self._rows_from(dev_no, plst, last_map), info
 
     # ---------------- 规则求值 ----------------
 
@@ -595,48 +748,108 @@ class WatchEngine:
             return
 
         self.state['progress'] = [0, total]
+        R.load_defs_cache_once()   # 首轮：捡回上次（含截图那边）拉过的定义，只读一次
+        hit0 = self._counters.get('cache_hit', 0)
         self._say('本轮开始：{} 台设备，间隔 {} 分钟，限速 {:.1f} 请求/秒'
                   .format(total, int(self.state['interval'] // 60), RATE_PER_SEC))
 
         done, errors, throttled = 0, 0, False
-        results = []
+        defs = []                    # (cfg, tok, dev, info, plst)：定义拿到了，最新值还没取
+        failed = {}                  # dev_key -> 原因（本轮没问到）
+        meta = {}                    # dev_key -> (cfg, dev)，组装兜底用
 
         def work(cfg, tok, dev):
-            rows, info = self._fetch_device(dev['no'], tok)
-            return cfg, tok, dev, rows, info
+            """一台：设备信息 + 变量定义（都走 TTL 缓存，命中就 0 发）。
+
+            平台限流只按请求次数算，所以这两样只在缓存过期时才真正发请求；
+            稳态下一轮只剩「每账号 1 发最新值」。登录失效（4013/1702）重登一次再试。
+            """
+            try:
+                return cfg, tok, dev, self._dev_info(cfg['name'], dev, tok), \
+                    self._point_defs(cfg['name'], dev['no'], tok)
+            except ApiError as e:
+                if e.auth:
+                    tok2 = self._relogin(cfg)
+                    return cfg, tok2, dev, self._dev_info(cfg['name'], dev, tok2), \
+                        self._point_defs(cfg['name'], dev['no'], tok2)
+                raise
 
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
             futs = {}
             for cfg, tok, d in jobs:
                 if self._stop.is_set():
                     break
-                futs[pool.submit(work, cfg, tok, d)] = d
+                futs[pool.submit(work, cfg, tok, d)] = (cfg, d)
             for f in as_completed(futs):
                 done += 1
                 self.state['progress'] = [done, total]
+                cfg, d = futs[f]
+                key = '{}|{}'.format(cfg['name'], d['no'])
+                meta[key] = (cfg, d)
                 try:
-                    results.append(f.result())
+                    defs.append(f.result())
                 except ApiError as e:
                     errors += 1
+                    failed[key] = e.note or '取数失败:{}'.format(str(e)[:60])
                     if e.throttled:
                         throttled = True
                         self._say('！！平台拒绝服务（疑似风控）：{}'.format(str(e)[:120]))
-                        break
-                    if errors <= 3:
-                        self._say('取数失败 {}: {}'.format(futs[f]['name'][:20], str(e)[:80]))
+                    elif errors <= 3:
+                        self._say('取数失败 {}: {}'.format(d['name'][:20], str(e)[:80]))
                 except Exception as e:
                     errors += 1
+                    failed[key] = '取数异常:{}'.format(repr(e)[:60])
                     if errors <= 3:
-                        self._say('取数异常 {}: {}'.format(futs[f]['name'][:20], repr(e)[:80]))
+                        self._say('取数异常 {}: {}'.format(d['name'][:20], repr(e)[:80]))
 
-        if throttled:
-            self._pause_for_throttle('平台返回限流')
-            self.state['running'] = False
-            return
+        # ---- 最新值按账号合批：每账号 1 发起（超过 2000 点再分片）----
+        # 以前每台设备单独发一次 last，94 台就是 94 发；合批后一个账号 1 发。
+        # 实测 47 台 1054 点一次返回 1048 条、0.9 秒。
+        by_acc = {}
+        for item in defs:
+            by_acc.setdefault(item[0]['name'], []).append(item)
+        last_maps = {}
+        for acc, items in by_acc.items():
+            pairs = []
+            for cfg, tok, dev, info, plst in items:
+                for p in plst:
+                    rid = p.get('dataPointRelId')
+                    if rid is not None:
+                        pairs.append((dev['no'], rid))
+            if not pairs:
+                last_maps[acc] = ({}, {})
+                continue
+            tok0 = items[0][1]
+            try:
+                last_maps[acc] = self._last_batch(pairs, tok0)
+            except ApiError as e:
+                if e.auth:                       # 账号级：重登一次整批重发
+                    try:
+                        last_maps[acc] = self._last_batch(pairs, self._relogin(items[0][0]))
+                        continue
+                    except Exception as e2:
+                        e = e2 if isinstance(e2, ApiError) else e
+                if getattr(e, 'throttled', False):
+                    throttled = True
+                note = getattr(e, 'note', '') or '取数失败:{}'.format(str(e)[:60])
+                for cfg, tok, dev, info, plst in items:
+                    failed['{}|{}'.format(cfg['name'], dev['no'])] = note
+                last_maps[acc] = ({}, {})
+
+        # 组装 rows。合批里没拿到的设备算「没问到」，绝不能拿空表当「没数据」
+        results = []
+        for cfg, tok, dev, info, plst in defs:
+            key = '{}|{}'.format(cfg['name'], dev['no'])
+            lmap, lfail = last_maps.get(cfg['name'], ({}, {}))
+            if dev['no'] in lfail:
+                failed[key] = lfail[dev['no']]
+                continue
+            results.append((cfg, tok, dev, self._rows_from(dev['no'], plst, lmap), info))
 
         # 汇总本轮结果
         res_by_key = {}
         fresh = {}
+        now = time.time()
         try:
             want_min = int(self.rules.get('stale_minutes') or 30)
         except (TypeError, ValueError):
@@ -656,10 +869,35 @@ class WatchEngine:
                 'status': ST_TEXT.get(st, str(st)), 'age_min': age,
                 'newest': max(times) if times else '-',
                 'vals': {r[1]: {'v': r[4], 't': r[3]} for r in rows},
-                'n_points': len(rows), 'ts': time.time(),
+                'n_points': len(rows), 'ts': now,
                 'info': {'org': info.get('projectName'), 'addr': info.get('address')},
+                'note': '',
             }
 
+        # ★ 这一轮没问到的设备：沿用上一轮的状态与数值，只挂一条原因。
+        #   以前这里要么什么都不写（设备从列表里消失）、要么被空表刷成「离线」，
+        #   现场看到的就是「明明有数据却显示离线、变量全变成 -」。
+        #   没问到 ≠ 设备故障，所以绝不改 status，也绝不报警。
+        for key, note in failed.items():
+            prev = self._devices.get(key)
+            if prev:
+                ent = dict(prev)          # status/age_min/vals/newest/n_points 原样沿用
+                ent['note'] = note
+                ent['note_at'] = now
+                fresh[key] = ent
+                continue
+            hit = meta.get(key)
+            acc, no = key.split('|', 1)
+            name = hit[1].get('name') if hit else no
+            # 从来没有成功过 → 没有「上一轮」可沿用，给「未巡」而不是凭空判离线
+            fresh[key] = {
+                'acc': acc, 'no': no, 'name': name,
+                'status': '未巡', 'age_min': None, 'newest': '-',
+                'vals': {}, 'n_points': 0, 'ts': now,
+                'info': {}, 'note': note, 'note_at': now,
+            }
+
+        # 本轮采集结果自动落盘（历史记录页的本地数据源）
         # 本轮采集结果自动落盘（历史记录页的本地数据源）
         self._record_rows(results)
 
@@ -776,12 +1014,39 @@ class WatchEngine:
         self.state['last_duration'] = time.time() - t0
         self.state['requests_last_round'] = self._counters['requests']
         self.state['progress'] = [total, total]
-        if not errors:
-            self.state['consecutive_fail'] = 0
 
-        self._say('本轮完成：{}/{} 台成功（失败 {}），请求 {} 次，耗时 {:.0f} 秒'
-                  .format(len(results), done, errors, self.state['requests_last_round'],
+        # 「没问到」与「真离线」必须分开计数：
+        # 前者是平台没答（限流/无权限/登录失效），后者是问到了、数据确实不对。
+        # 混在一起会让人以为一大批设备同时故障，实际只是被平台挡了一次。
+        ok_n = len(results)
+        unknown_n = len(failed)
+        offline_n = sum(1 for v in fresh.values()
+                        if v.get('status') == '离线' and not v.get('note'))
+        self.state['round_stat'] = {
+            'total': total, 'ok': ok_n, 'unknown': unknown_n,
+            'offline': offline_n, 'errors': errors,
+        }
+        # 连续失败只按「一台都没拿到」算：部分设备被平台挡掉不该触发整轮退避，
+        # 否则一次 5144 就把下一轮推到 30 分钟后，监控直接断层。
+        if ok_n:
+            self.state['consecutive_fail'] = 0
+        else:
+            self.state['last_error'] = '本轮一台都没取到（{}）'.format(
+                '；'.join(list(failed.values())[:2]) or '无可用设备')
+        if throttled:
+            self._pause_for_throttle('本轮有请求被平台拒绝')
+
+        R.save_defs_cache()      # 定义落盘：截图那边（另一个进程）下次点就能直接用
+        self._say('本轮完成：{}/{} 台成功，没问到 {} 台，真离线 {} 台，'
+                  '请求 {} 次（变量定义命中缓存 {} 台；设备信息直接取设备列表），耗时 {:.0f} 秒'
+                  .format(ok_n, total, unknown_n, offline_n,
+                          self.state['requests_last_round'],
+                          self._counters.get('cache_hit', 0) - hit0,
                           self.state['last_duration']))
+        if unknown_n:
+            sample = list(failed.values())[:3]
+            self._say('没问到 {} 台，本轮沿用上一轮数据：{}'.format(
+                unknown_n, '；'.join(sample)))
         if first_time:
             self._say('首次巡检完成：当前命中 {} 条，已按设置推送'
                       '（此后状态突变继续提醒）'.format(len(self._anoms)))
@@ -795,16 +1060,24 @@ class WatchEngine:
             't': self.state['last_run'], 'total': total, 'ok': len(results),
             'errors': errors, 'anoms': len(self._anoms),
             'new': len(self._new_anoms), 'req': self.state['requests_last_round'],
-            'dur': self.state['last_duration'],
+            'dur': self.state['last_duration'], 'unknown': unknown_n,
         })
         del self.state['history'][:-20]
         self.state['running'] = False
         self.state['stage'] = ''
 
     def _pause_for_throttle(self, why):
-        until = time.time() + BACKOFF_429
-        self.state['paused_reason'] = '疑似触发平台限流，已暂停至 {}（{}）'.format(
-            datetime.fromtimestamp(until).strftime('%H:%M'), why[:80])
+        """平台限流：全账号冷却 20 秒（可配 20~60），到点重跑本轮。
+
+        旧值 1800 秒（半小时）等于整轮放弃：平台实测 20 秒就恢复，
+        白等半小时的代价是这段监控完全空白，用户看到的是一整片「离线」。
+        """
+        sec = self._throttle_seconds()
+        until = time.time() + sec
+        self._cool_until = max(self._cool_until, until)
+        self.state['paused_reason'] = '平台限流，暂停请求至 {}（{}）'.format(
+            datetime.fromtimestamp(until).strftime('%H:%M:%S'), why[:80])
+        self.state['retry_in'] = sec          # _loop 读到它就到点重跑，不按 15 分钟等
         self.state['next_run'] = until
         self._say(self.state['paused_reason'])
 
@@ -840,6 +1113,15 @@ class WatchEngine:
                     self.state['running'] = False
             if self._stop.is_set():
                 return
+            # 平台限流后按冷却时间回来（20 秒级别），不按 15 分钟等一轮：
+            # 否则一次 5144 就让监控空白整整一轮，用户看到一片「离线」。
+            cool = self.state.pop('retry_in', None)
+            if cool:
+                delay = max(5.0, min(float(cool) + 2.0, 120.0))
+                self._say('平台限流冷却，{} 秒后重跑本轮'.format(int(delay)))
+                self.state['next_run'] = time.time() + delay
+                self._stop.wait(delay)
+                continue
             # 计算下一轮
             base = self.state['interval']
             cf = self.state['consecutive_fail']
@@ -1017,6 +1299,9 @@ class WatchEngine:
             'stage': self.state['stage'],
             'paused_reason': self.state['paused_reason'],
             'requests_last_round': self.state['requests_last_round'],
+            # 本轮「没问到 / 真离线」分开的计数（前端顶部横条显示）
+            'round_stat': self.state.get('round_stat'),
+            'cool_left': max(0, int(self._cool_until - now)) if self._cool_until else 0,
             'device_count': n_dev,
             'scope': self._scope,
             'anomalies': anoms,
@@ -1074,6 +1359,7 @@ class WatchEngine:
             'vals': self._vals_with_rw(acc, dev_no, tok, rows),
             'n_points': len(rows), 'ts': now,
             'info': {'org': info.get('projectName'), 'addr': info.get('address')},
+            'note': '',            # 取数成功 → 清掉上一轮留下的「没问到」原因
         }
         # 该设备的异常重算（与 _scan 汇总段同一套逻辑）
         anoms = []
@@ -1120,7 +1406,7 @@ class WatchEngine:
     # 传进 dataPointId 字段（与 lastDataPoint 相同），文档示例里的真 dataPointId 查不到数据。
 
     HISTORY_URL = 'https://history.usr.cn:7002/history/cusdevice/dataPoint'
-    PTS_TTL = 3600            # 变量点定义缓存时长（秒），定义几乎不变
+    PTS_TTL = DEF_TTL         # 变量点定义缓存时长（秒）；与轮询共用同一份缓存
     HIST_PAGE_SIZE = 2000     # 平台单页上限（实测 5000/10000 返回空）
     HIST_MAX_PAGES = 25       # 最多翻 25 页 = 5 万点，覆盖分钟级设备 30 天
     HIST_CACHE_TTL = 90       # 同一设备同一范围的短期缓存（秒）
@@ -1227,11 +1513,62 @@ class WatchEngine:
             }
         return out
 
+    def _def_ttl(self):
+        """定义/信息的缓存时长：默认 DEF_TTL，规则里 def_ttl 可覆盖。
+
+        下限夹在「一轮间隔」上：配得比巡检间隔还短的话，每轮都会过期，
+        一次也命中不了 —— 那种配置只是让人以为自己省了请求。
+        """
+        try:
+            v = float(self.rules.get('def_ttl') or 0)
+        except (TypeError, ValueError):
+            v = 0
+        try:
+            iv = float(self.state.get('interval') or DEFAULT_INTERVAL)
+        except (TypeError, ValueError):
+            iv = float(DEFAULT_INTERVAL)
+        floor = max(60.0, iv)          # 至少活得比一轮长
+        return max(floor, v if v > 0 else float(DEF_TTL))
+
+    def _dev_info(self, acc, dev, tok):
+        """设备元信息（组织/模板/网关/地址）。
+
+        优先用设备列表自带的那几个字段（平台同一个响应里就有），这一项从
+        「每台每轮 1 发」变成 0 发；只有列表里确实没有（例如别处只给了设备号）
+        才去问平台，问到的照旧按 TTL 缓存。
+
+        状态判定用的是最新值的时间戳，和这几十个字无关，所以少问这一发
+        不会让「在线/陈旧/离线」变得不准。
+        """
+        if isinstance(dev, dict) and 'org' in dev:
+            m = R.dev_meta(dev)
+            if m['projectName'] or m['deviceName'] or m['address']:
+                # 不记 cache_hit：这不是「缓存命中」，是本来就打算从列表拿、没打算发请求
+                return m
+        dev_no = dev['no'] if isinstance(dev, dict) else dev
+        key = '{}|{}'.format(acc, dev_no)
+        hit = self._info_cache.get(key)
+        ttl = self._def_ttl()
+        if hit and time.time() - hit[0] < ttl:
+            self._counters['cache_hit'] = self._counters.get('cache_hit', 0) + 1
+            return hit[1]
+        info = R.api_data(self._api(R.INFO_URL, {'cusdeviceNo': dev_no}, tok, '设备信息'),
+                          '设备信息') or {}
+        if info:
+            self._info_cache[key] = (time.time(), info)
+        return info
+
     def _point_defs(self, acc, dev_no, tok):
-        """变量点定义（含 dataPointRelId / unit），带 TTL 缓存"""
+        """变量点定义（含 dataPointRelId / unit），带 TTL 缓存
+
+        空结果不进缓存：平台偶发回空表（或还没授权）时，缓 10 分钟等于把这台设成
+        「采集异常」并按 TTL 一直显示，比多发两次请求坏得多。
+        """
         key = '{}|{}'.format(acc, dev_no)
         hit = self._pts_cache.get(key)
-        if hit and time.time() - hit[0] < self.PTS_TTL:
+        ttl = self._def_ttl()
+        if hit and time.time() - hit[0] < ttl:
+            self._counters['cache_hit'] = self._counters.get('cache_hit', 0) + 1
             return hit[1]
         pts = self._api(R.POINTS_URL, {
             'dataPointType': '', 'dataPointName': '', 'dataPointIdList': [], 'slaveId': '',
@@ -1239,7 +1576,8 @@ class WatchEngine:
             'getLocationDatas': 1, 'getStringDatas': 0, 'getBitDatas': 0,
             'pageNo': 1, 'pageSize': 500}, tok)
         plst = (pts.get('data') or {}).get('cusdeviceDataPointList') or []
-        self._pts_cache[key] = (time.time(), plst)
+        if plst:
+            self._pts_cache[key] = (time.time(), plst)
         return plst
 
     # 【对齐手机版 v0.28】去重水位改为内存态（self._rec_val / self._rec_ep），

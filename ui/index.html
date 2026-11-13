@@ -87,6 +87,25 @@
   .dhead .s.on i{opacity:1}
   .dbody{flex:1;min-height:0;overflow-y:auto}
   .drow{height:44px;flex:none;border-bottom:1px solid #F4F5F7;cursor:pointer}
+  /* 这一轮没问到平台（限流 / 无权限 / 登录失效）时，设备名下多一行橙色原因。
+     行高改成自适应，不能固定 44px —— 固定高度会把第二行裁掉或挤在一起。 */
+  .drow.hasnote{height:auto;min-height:44px;padding-top:4px;padding-bottom:4px}
+  .drow .dnote{font-size:11px;line-height:1.45;color:#C77700;margin-top:1px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
+  /* ===== 截图大图弹窗（点设备行打开）===== */
+  .shotm .mbox{width:980px;max-width:94vw;max-height:94vh}
+  .shotimg{flex:1;min-height:120px;overflow:auto;background:#F4F6F9;padding:12px;
+    display:flex;align-items:flex-start;justify-content:center}
+  .shotimg img{max-width:100%;height:auto;background:#fff;border-radius:6px;
+    box-shadow:0 2px 12px rgba(0,0,0,.12)}
+  .shothold{padding:40px 20px;font-size:12.5px;color:#8A9099;text-align:center;line-height:1.9}
+  .shotfoot{display:flex;align-items:center;gap:12px;justify-content:space-between;
+    padding:11px 16px;border-top:1px solid #F0F2F5}
+  .shotmeta{font-size:12px;color:#7B828C;line-height:1.5;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .shotmeta .ok{color:#12A150}
+  .shotmeta .bad{color:#D9383D}
+
   .drow:hover{background:#F8FAFE}
   .drow.on{background:#EDF3FE}
   .dname{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:26px}
@@ -496,6 +515,11 @@
           <button class="btn" id="btnPick" onclick="pickStations()">选择站点</button>
           <button class="btn" id="btnClean" onclick="openBatchModal()" title="清理往期截图批次及其压缩包">清理往期</button>
           <button class="btn" id="btnPause" onclick="pauseRun()" disabled>暂停</button>
+          <button class="btn" id="btnEmpty" onclick="startEmptyRun()"
+            style="display:none;white-space:nowrap;flex:none"
+            title="只补跑上一批里没数据的站点（离线 / 采集异常 / 没取到 / 截图缺失）；其余站点的截图和状态一点不动，报告按编号就地替换。">
+            ⟳ 只跑没数据的 0 台
+          </button>
           <button class="btn pri" id="btnRun" onclick="startRun()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2l11 6.8-11 6.8z"/></svg>
             开始截图
@@ -793,6 +817,22 @@
       </div>
     </div>
   </div>
+  <!-- 截图大图弹窗：点设备行打开，底部可只重拍这一张 -->
+  <div class="mwrap shotm" id="shotModal">
+    <div class="mbox">
+      <div class="mhead"><span id="shotTitle">截图</span>
+        <button class="x" onclick="closeShotModal()" title="关闭">✕</button></div>
+      <div class="shotimg" id="shotBody"></div>
+      <div class="shotfoot">
+        <span class="shotmeta" id="shotMeta"></span>
+        <span style="display:flex;gap:8px;flex:none">
+          <button class="btn" id="shotOpen" onclick="shotOpenFile()">打开原图</button>
+          <button class="btn" id="shotRe" onclick="reshotCurrent()">⟳ 重新获取这张截图</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
   <!-- 往期截图清理弹窗 -->
   <div class="mwrap" id="batchModal">
     <div class="mbox">
@@ -959,6 +999,16 @@
 
   // ---------- 账号列表 ----------
   var ACC_CFG = '';      // accounts.csv 配置指纹（mtime+size）：判断站点筛选/账号是否改过
+  /* 各账号「当前筛选台数」的指纹。引擎刚启动时还没缓存设备列表，scoped 会是 null，
+     账号栏只能退回上次巡站的旧台数；等引擎拉到清单，台数从 null 变成 47，配置文件
+     却没动过 —— 原来的定时巡检只看 cfg 就直接返回，这个数永远补不上（顶部 47 台、
+     左侧还是 39 台）。所以台数也要单独比一次，变了只重画左栏，不清设备缓存。 */
+  var ACC_SCOPED = '';
+  function scopedSig(list) {
+    return (list || []).map(function (a) {
+      return a.name + ':' + (typeof a.scoped === 'number' ? a.scoped : '-');
+    }).join('|');
+  }
   /* 账号配置变了：设备列表缓存立刻作废并重拉。
      原来这里不清缓存，改完站点筛选切回数据监控，看到的还是改之前那批设备
      （60 秒缓存 + 只在切页时刷新），得等缓存过期或跑一次巡站才对。 */
@@ -972,6 +1022,7 @@
       if (j && j.ok && (j.accounts || []).length) {
         var cfgChanged = !!(ACC_CFG && j.cfg && j.cfg !== ACC_CFG);
         if (j.cfg) ACC_CFG = j.cfg;
+        ACC_SCOPED = scopedSig(j.accounts);
         ACCOUNTS = j.accounts;
         renderAccounts();
         if (cfgChanged) onAccCfgChanged();
@@ -999,17 +1050,22 @@
   /* 定时看一眼账号配置有没有变。为什么需要：用户可以在账号页点「编辑账号」
      直接用系统编辑器改 accounts.csv（或者另一边改了文件），那种改动不会经过
      本页面的保存按钮，前端完全不知道。这里 30 秒对一次指纹，变了就重画账号
-     并清掉设备缓存；没变就什么都不做，不打断正在看的界面。 */
+     并清掉设备缓存；没变就什么都不做，不打断正在看的界面。
+     另外顺带比一次台数指纹（见 ACC_SCOPED 注释）：只有台数补齐时仅重画左栏，
+     不动设备列表缓存，也不打断正在看的界面。 */
   function checkAccCfg() {
     if (DEMO) return;
     api('/api/accounts').then(function (j) {
       if (!j || !j.ok || !j.cfg) return;
-      if (!ACC_CFG) { ACC_CFG = j.cfg; return; }
-      if (j.cfg === ACC_CFG) return;
-      ACC_CFG = j.cfg;
+      var sig = scopedSig(j.accounts);
+      var changed = !!(ACC_CFG && j.cfg !== ACC_CFG);
+      var scopedChanged = !!(sig && sig !== ACC_SCOPED);
+      if (!ACC_CFG || changed) ACC_CFG = j.cfg;
+      ACC_SCOPED = sig;
+      if (!changed && !scopedChanged) return;
       ACCOUNTS = j.accounts || ACCOUNTS;
       renderAccounts();
-      onAccCfgChanged();
+      if (changed) onAccCfgChanged();
     }).catch(function () {});
   }
   /* 账号搜索关键字（左下角「搜索账号」）。
@@ -1439,8 +1495,15 @@
       if (pinned) row.classList.add('pin');
       var pini = pinned
         ? '<i class="pini" title="已置顶 · 右键可取消置顶">' + ICON_PIN + '</i>' : '';
+      /* 这一轮没问到平台时的原因，另起一行小字。
+         ★ 不拼进 status：前端到处是 '在线'/'数据陈旧' 这类字符串比较，
+           把原因塞进去会让状态判断全乱；状态仍旧是四个字符串之一。 */
+      if (d.note) row.classList.add('hasnote');   // 用 add，别覆盖掉 .pin
+      var noteHtml = d.note
+        ? '<div class="dnote" title="' + esc(d.note) + '">' + esc(d.note) + '</div>' : '';
       row.innerHTML = '<div class="dname">' + pini + flag + esc(d.name || d.no || '')
-        + '<button class="cpname" title="复制站点名称">' + ICON_CP + '</button></div>'
+        + '<button class="cpname" title="复制站点名称">' + ICON_CP + '</button>'
+        + noteHtml + '</div>'
         + '<div class="st"><i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st) + '</div>'
         + '<div class="age" data-nt="' + esc(d.newest || '') + '" title="'
         + esc(d.newest || '无数据时间') + '">' + esc(ageText(d)) + '</div>';
@@ -1457,7 +1520,7 @@
           renderLiveCard(d);                             // 监控页：实时数据卡
           if (W_TAB !== 'live') wTab('live');            // 在异常/规则页签下点站点 → 跳回实时数据
         }
-        else showPreview(d);                             // 巡站页：截图预览
+        else { showPreview(d); openShotModal(d); }   // 巡站页：右侧小预览 + 大图弹窗
       };
       box.appendChild(row);
     });
@@ -1519,7 +1582,9 @@
       }
     }
     var st = devs.filter(function (d) { return d.status === '数据陈旧'; }).length;
-    var unk = devs.filter(function (d) { return !d.status; }).length;
+    // 「未巡」（还没跑过）和「未取到」（跑了但平台没给数据）都不能算进离线，
+    // 否则底部的「离线 N」会把它们混在一起，看着像设备真掉线了
+    var unk = devs.filter(function (d) { return !d.status || d.status === '未取到'; }).length;
     var off = devs.length - on - st - unk;
     if (foot) foot.textContent = '共 ' + devs.length + ' 台 · 在线 ' + on + ' / 陈旧 ' + st + ' / 离线 ' + off
       + (unk ? ' / 未巡 ' + unk : '');
@@ -1635,6 +1700,18 @@
     }).join('\u0001');
   }
   /* 只改变化的那几格。返回 false 表示没法原地改（结构对不上），调用方回退整卡重建。 */
+  /* 实时卡副标题：变量数 / 本轮没问到平台的原因 / 命中的异常。
+     原因写在这里而不是拼进 status —— 状态胶囊只认四个字符串。 */
+  function liveMetaHtml(j) {
+    var an = (j.anoms || []).map(function (x) { return x.name || x.rule_name || ''; })
+      .filter(Boolean).join('、');
+    var s = '实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量';
+    if (j.note) {
+      s += ' · <span style="color:#C77700">' + esc(j.note) + '（下面是上一轮的数据）</span>';
+    }
+    if (an) s += ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>';
+    return s;
+  }
   function patchLive(j) {
     var rows = $$('#pvBodyW .r');
     if (rows.length !== LIVE_VALS.length) return false;
@@ -1683,10 +1760,7 @@
     }
     var meta = $('#pvBodyW .phmeta');
     if (meta) {
-      var an = (j.anoms || []).map(function (x) { return x.name || x.rule_name || ''; })
-        .filter(Boolean).join('、');
-      var mh = '实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量'
-        + (an ? ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>' : '');
+      var mh = liveMetaHtml(j);
       if (meta.innerHTML !== mh) meta.innerHTML = mh;
     }
     return true;
@@ -1752,8 +1826,7 @@
       + (j.manual ? '已获取' : '立即获取') + '</button></div>'
       + '<div class="phname">' + esc(PV_LIVE.name)
       + '<button class="cpnm" title="复制站点名称">' + ICON_CP + '</button></div>'
-      + '<div class="phmeta">实时值 · 共 ' + (j.n_points || (j.vals || []).length) + ' 个变量'
-      + (an ? ' · <span style="color:#E5484D">异常: ' + esc(an) + '</span>' : '') + '</div>'
+      + '<div class="phmeta">' + liveMetaHtml(j) + '</div>'
       + '<div class="rows">' + (rows || '<div class="r"><span class="rk">—</span><span class="rv">无变量</span></div>') + '</div></div>');
     // 回填用户正在输入的值 + 绑定写入按钮
     $$('#pvBodyW .wnum').forEach(function (el) {
@@ -1993,6 +2066,142 @@
     api('/api/openfolder?p=' + encodeURIComponent(PV_PATH.replace(/\/[^/]*$/, '')));
   }
 
+  // ---------- 截图大图弹窗 +「⟳ 重新获取这张截图」----------
+  // 单击设备行 = 打开大图。原来单击只换右边那个小预览，图里的字根本看不清，
+  // 想确认某台到底拍成什么样还得去文件夹里翻。
+  var SMCUR = null;            // 弹窗里当前这台：{no,name,shot,at,status}
+  var SHOT_TICK = null, SHOT_T0 = 0, SHOT_BUSY = false;
+
+  function cnStat(s) {
+    return ({ online: '在线', stale: '数据陈旧', offline: '离线',
+              blank: '采集异常', unknown: '未取到' })[s] || s || '';
+  }
+  function openShotModal(d) {
+    var m = $('#shotModal'); if (!m) return;
+    SMCUR = { no: d.no || '', name: d.name || d.no || '', shot: d.shot || '',
+              at: d.shot_time || '', status: shownStatus(d), acc: accountOf(d) };
+    $('#shotTitle').textContent = SMCUR.name + (SMCUR.no ? ' · ' + SMCUR.no : '');
+    shotPaint(); shotReReset();
+    m.classList.add('show');
+  }
+  function closeShotModal() {
+    var m = $('#shotModal'); if (m) m.classList.remove('show');
+    if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
+    SHOT_BUSY = false;
+    // 后台线程不打断：图还在拍，报告照旧会更新；下次打开弹窗直接看到新图
+    SMCUR = null;
+  }
+  function shotPaint(extra) {
+    if (!SMCUR) return;
+    var b = $('#shotBody');
+    if (!b) return;
+    if (SMCUR.shot) {
+      // 同名覆盖后文件名不变，必须带时间戳参数，否则浏览器把缓存里的旧图又拿给你看
+      b.innerHTML = '<img id="shotImg" alt="截图" src="/shot?p='
+        + encodeURIComponent(SMCUR.shot) + '&t=' + Date.now() + '">';
+    } else {
+      b.innerHTML = '<div class="shothold">「' + esc(SMCUR.name) + '」这一批里没有截图。<br>'
+        + '点下面「重新获取这张截图」只补拍这一台。</div>';
+    }
+    $('#shotMeta').innerHTML = extra || ('状态 <b>' + esc(SMCUR.status || '未巡') + '</b>'
+      + (SMCUR.at ? ' · 截图于 ' + esc(SMCUR.at) : ''));
+  }
+  function shotReReset() {
+    var b = $('#shotRe'); if (!b) return;
+    b.disabled = false; b.textContent = '⟳ 重新获取这张截图';
+  }
+  function shotElapsed() { return Math.max(0, Math.round((Date.now() - SHOT_T0) / 1000)); }
+  function shotBusyPaint(stage) {
+    var b = $('#shotRe'); if (b) b.textContent = '⟳ 重拍中 ' + shotElapsed() + ' 秒…';
+    var m = $('#shotMeta');
+    if (m) m.innerHTML = '<span class="bad">' + esc(stage || '取数据并截图') + '…</span>'
+      + ' 已等 ' + shotElapsed() + ' 秒';
+  }
+  function shotFail(msg) {
+    if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
+    SHOT_BUSY = false;
+    shotReReset();
+    // 失败时不动弹窗里那张图：旧图是有效证据，删掉或换成空白就再也说不清了
+    var m = $('#shotMeta');
+    if (m) m.innerHTML = '<span class="bad">重拍失败：' + esc(msg) + '</span> · 旧图原样保留';
+  }
+  function shotOpenFile() {
+    if (SMCUR && SMCUR.shot) api('/api/open?p=' + encodeURIComponent(SMCUR.shot));
+  }
+  function reshotCurrent() {
+    if (DEMO) { toast('演示模式：请通过 Electron 启动后再重拍'); return; }
+    if (!SMCUR || SHOT_BUSY) return;
+    if (!SMCUR.no) { toast('这一台没有设备编号，没法按编号重拍'); return; }
+    SHOT_BUSY = true; SHOT_T0 = Date.now();
+    var b = $('#shotRe'); if (b) b.disabled = true;
+    shotBusyPaint('提交重拍…');
+    // 只发请求、不等结果：真拍一台要十几秒，同步等会把整个界面卡住
+    api('/api/reshot', { method: 'POST', body: JSON.stringify({
+      no: SMCUR.no, batch: LAST_BATCH || '' }) })
+      .then(function (j) {
+        if (!j || !j.ok) { shotFail((j && j.msg) || '重拍请求没发出去'); return; }
+        if (SHOT_TICK) clearInterval(SHOT_TICK);
+        SHOT_TICK = setInterval(shotPoll, 800);
+        shotPoll();
+      })
+      .catch(function () { shotFail('后端未连接'); });
+  }
+  function shotPoll() {
+    api('/api/reshotstat').then(function (j) {
+      if (!j || !j.ok) return;
+      if (j.busy) { shotBusyPaint(j.stage); return; }        // 还在拍：按钮上走秒
+      if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
+      SHOT_BUSY = false;
+      if (!SMCUR) return;         // 弹窗关了：结果已经写进报告，下次打开能看到
+      if (j.err) { shotFail(j.err); return; }
+      shotApply(j);
+    }).catch(function () {});
+  }
+  function shotApply(j) {
+    var no = SMCUR.no;
+    // 报告里的账号目录和文件名只有后端知道，回来问一次（纯读磁盘，不再敲平台）
+    api('/api/shotof?no=' + encodeURIComponent(no)).then(function (k) {
+      if (!SMCUR || SMCUR.no !== no) return;
+      if (!k || !k.ok) { shotFail('拍完了，但读不到报告条目'); return; }
+      var ent = k.entry || {};
+      var rel = (k.batch + '/' + k.acc_dir + '/' + (ent.file || '')).replace(/\\/g, '/');
+      SMCUR.shot = rel;
+      SMCUR.at = ent.at || j.at || '';
+      SMCUR.status = cnStat(ent.status) || SMCUR.status;
+      shotPaint('<span class="ok">已重新获取</span>'
+        + (SMCUR.at ? ' · ' + esc(SMCUR.at) : '')
+        + ' · 状态 <b>' + esc(SMCUR.status) + '</b>');
+      shotReReset();
+      patchShotRow(no, ent, rel);
+      loadEmptyCount();          // 这台补上了，按钮上的数字要跟着减
+    }).catch(function () { shotFail('拍完了，但读取报告失败'); });
+  }
+  /* 只改这一行。整表重画会把滚动位置和选中态都弄丢，用户还会以为列表被换成了别的站。 */
+  function patchShotRow(no, ent, rel) {
+    var d = null;
+    (CUR_DEVS || []).forEach(function (x) { if (x.no === no) d = x; });
+    if (d) {
+      if (rel) d.shot = rel;
+      if (ent.at) d.shot_time = ent.at;
+      var s = cnStat(ent.status); if (s) d.status = s;
+      var age = ent.age || '';
+      if (!age) { var m = /数据(.+)$/.exec(ent.preview || ''); age = m ? m[1] : ''; }
+      if (age) d.age = age;
+      d.newest = '';      // 报告里没有「最新数据时间」的绝对时刻，别拿旧值把状态又判回去
+    }
+    var box = $('#devList');
+    var row = (box && box.querySelector) ? box.querySelector('.drow[data-no="' + no + '"]') : null;
+    if (row) {
+      var st = d ? shownStatus(d) : cnStat(ent.status);
+      var sEl = row.querySelector('.st');
+      if (sEl) sEl.innerHTML = '<i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st);
+      var aEl = row.querySelector('.age');
+      if (aEl) aEl.textContent = d ? ageText(d) : (ent.age || '');
+    }
+    if (d && PV_PATH) showPreview(d);   // 右侧小预览也换成新图
+  }
+
+
   // ---------- 运行 / 暂停 / 状态轮询 ----------
   function startRun() {
     if (DEMO) { toast('演示模式：请通过 Electron 启动以执行巡站'); alert('当前为界面预览（未连接后端）。请用 Electron 启动后执行巡站。'); return; }
@@ -2015,6 +2224,45 @@
   function pauseRun() {
     if (DEMO) return;
     api('/api/pause', { method: 'POST' }).then(function () { $('#btnPause').textContent = '已暂停'; });
+  }
+
+  // ---------- 「⟳ 只跑没数据的 N 台」----------
+  // N 只统计上一批报告里状态是离线 / 采集异常 / 没取到，或者截图文件不见了的站；
+  // 「数据陈旧」算有数据，不算进来。数字由后端读报告算，页面每刷新一次都是同一口径。
+  var EMPTY_N = 0, EMPTY_BATCH = '';
+  function loadEmptyCount() {
+    api('/api/emptycount').then(function (j) {
+      var b = $('#btnEmpty');
+      EMPTY_N = (j && j.ok) ? (j.total || 0) : 0;
+      EMPTY_BATCH = (j && j.batch) || '';
+      if (!b) return;
+      if (EMPTY_N > 0) {
+        b.style.display = '';
+        b.textContent = '⟳ 只跑没数据的 ' + EMPTY_N + ' 台';
+        b.title = '只补跑 ' + (EMPTY_BATCH || '上一批') + ' 里没数据的 ' + EMPTY_N
+          + ' 台（离线 / 采集异常 / 没取到 / 截图缺失）。其余站点的截图和状态一点不动，'
+          + '报告按设备编号就地替换，跑完仍打同一个压缩包。';
+      } else {
+        b.style.display = 'none';
+      }
+    }).catch(function () {});
+  }
+  function startEmptyRun() {
+    if (DEMO) { toast('演示模式：请通过 Electron 启动以执行巡站'); return; }
+    if (!EMPTY_N) { toast('上一批没有「没数据」的站点'); return; }
+    var b = $('#btnEmpty');
+    if (b) b.disabled = true;
+    api('/api/run', { method: 'POST', body: JSON.stringify({
+      only_empty: true, workers: parseInt($('#setWorkers').value, 10) || 4 }) })
+      .then(function (j) {
+        if (!j || !j.ok) {
+          if (b) b.disabled = false;
+          toast((j && j.msg) || '补跑没启动');
+          return;
+        }
+        toast('补跑 ' + j.total + ' 台 · 沿用批次 ' + (j.batch || ''));
+        startPoll();
+      });
   }
   function startPoll() { if (POLL) clearInterval(POLL); POLL = setInterval(poll, 900); poll(); }
   function fmtLine(ln) {
@@ -2066,9 +2314,11 @@
     pollLogs(function (j) {
       var p = j.progress || { done: 0, total: 0 };
       if (j.running) {
-        $('#stLeft').textContent = '截图中 ' + p.done + '/' + p.total
+        $('#stLeft').textContent = (j.only_empty ? '补跑没数据的站点 ' : '截图中 ')
+          + p.done + '/' + p.total
           + (j.workers ? ' · ' + j.workers + ' 线程' : '') + (j.stage ? ' · ' + j.stage : '');
         $('#btnPause').disabled = false; $('#btnRun').disabled = true;
+        if ($('#btnEmpty')) $('#btnEmpty').disabled = true;
       } else if (j.done) {
         $('#stLeft').textContent = '完成 ' + j.done[0] + ' 张 · 在线 ' + j.done[1];
         $('#btnPause').disabled = true; $('#btnRun').disabled = false; $('#btnPause').textContent = '暂停';
@@ -2076,11 +2326,13 @@
         AUTO_SHOT = true;              // 完成后自动展示第一张有截图的设备
         loadAccounts();
         if (SEL) selectAccount(SEL);   // 巡站完成后刷新设备列表，带上新截图
+        loadEmptyCount();              // 补跑完这一批的「没数据」台数要重算（通常是 0 了）
       } else {
         $('#stLeft').textContent = j.error
           ? '出错：' + String(j.error).slice(0, 80)
           : '就绪 · 勾选账号后点「开始截图」';
         $('#btnPause').disabled = true; $('#btnRun').disabled = false; $('#btnPause').textContent = '暂停';
+        if ($('#btnEmpty')) $('#btnEmpty').disabled = false;
       }
       if (j.zip) $('#stRight').textContent = '压缩包: ' + j.zip;
     });
@@ -3727,7 +3979,7 @@
   }
   function closeSiteModal() { $('#siteModal').classList.remove('show'); }
   $('#siteModal').onclick = function (e) { if (e.target === this) closeSiteModal(); };
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); if (window.closePinModal) window.closePinModal(); } });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); closeShotModal(); if (window.closePinModal) window.closePinModal(); } });
 
   // ---------- 往期截图清理 ----------
   var BATCHES = [], BM_SEL = {}, BM_ARM = false, BM_LATEST = '', BM_CUR = '';
@@ -3855,6 +4107,7 @@
       });
   }
   $('#batchModal').onclick = function (e) { if (e.target === this) closeBatchModal(); };
+  $('#shotModal').onclick = function (e) { if (e.target === this) closeShotModal(); };
   function smAll(v) { $$('#smList input[type=checkbox]').forEach(function (c) { c.checked = v; }); }
   function smOk() {
     var cbs = $$('#smList input[type=checkbox]');
@@ -4028,6 +4281,10 @@
   window.pickStations = pickStations;
   window.pauseRun = pauseRun;
   window.startRun = startRun;
+  window.startEmptyRun = startEmptyRun;     // 「⟳ 只跑没数据的 N 台」
+  window.closeShotModal = closeShotModal;  // 截图大图弹窗
+  window.shotOpenFile = shotOpenFile;
+  window.reshotCurrent = reshotCurrent;
   window.openShot = openShot;
   window.openShotDir = openShotDir;
   window.quitApp = quitApp;
@@ -4408,6 +4665,7 @@
 
   paintSortHead();   // 表头先把当前排序列的箭头画出来（默认「站名 ▲」或上次记住的那种）
   loadAccounts();
+  loadEmptyCount();  // 「只跑没数据的 N 台」按钮上的数字（为 0 时按钮不显示）
 })();
 </script>
 </body>
