@@ -92,19 +92,20 @@
   .drow.hasnote{height:auto;min-height:44px;padding-top:4px;padding-bottom:4px}
   .drow .dnote{font-size:11px;line-height:1.45;color:#C77700;margin-top:1px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:22px}
-  /* ===== 截图大图弹窗（点设备行打开）===== */
-  .shotm .mbox{width:980px;max-width:94vw;max-height:94vh}
-  .shotimg{flex:1;min-height:120px;overflow:auto;background:#F4F6F9;padding:12px;
-    display:flex;align-items:flex-start;justify-content:center}
-  .shotimg img{max-width:100%;height:auto;background:#fff;border-radius:6px;
-    box-shadow:0 2px 12px rgba(0,0,0,.12)}
-  .shothold{padding:40px 20px;font-size:12.5px;color:#8A9099;text-align:center;line-height:1.9}
-  .shotfoot{display:flex;align-items:center;gap:12px;justify-content:space-between;
-    padding:11px 16px;border-top:1px solid #F0F2F5}
-  .shotmeta{font-size:12px;color:#7B828C;line-height:1.5;min-width:0;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .shotmeta .ok{color:#12A150}
-  .shotmeta .bad{color:#D9383D}
+  /* ===== 右侧常驻预览上的「重新获取这张截图」 =====
+     桌面版不弹大图窗：右边本来就是常驻预览，再盖一层窗只会挡住列表。 */
+  .pvh .pvre{display:inline-flex;align-items:center;gap:4px;border:1px solid #DDE3EC;
+    border-radius:7px;padding:2px 8px;margin-left:10px;background:#fff;color:#2F6BFF;
+    font-size:11.5px;cursor:pointer;line-height:1.6;font-family:inherit}
+  .pvh .pvre:hover{background:#F4F7FD;border-color:#C9D6F5}
+  .pvh .pvre[disabled]{color:#B0B5BD;border-color:#EAEDF2;background:#FAFBFC;cursor:default}
+  /* 预览卡下面的那行提示：重拍进度 / 结果 / 失败原因，不覆盖图本身 */
+  .pvrtip{flex:none;margin:0 16px 12px;padding:8px 10px;border-radius:8px;background:#F7F9FC;
+    font-size:11.5px;line-height:1.6;color:#7B828C;word-break:break-all}
+  .pvrtip .ok{color:#12A150}
+  .pvrtip .bad{color:#D9383D}
+  .pvrtip .wait{color:#2F6BFF}
+  #pvBody .shot{cursor:zoom-in}
 
   .drow:hover{background:#F8FAFE}
   .drow.on{background:#EDF3FE}
@@ -517,8 +518,8 @@
           <button class="btn" id="btnPause" onclick="pauseRun()" disabled>暂停</button>
           <button class="btn" id="btnEmpty" onclick="startEmptyRun()"
             style="display:none;white-space:nowrap;flex:none"
-            title="只补跑上一批里没数据的站点（离线 / 采集异常 / 没取到 / 截图缺失）；其余站点的截图和状态一点不动，报告按编号就地替换。">
-            ⟳ 只跑没数据的 0 台
+            title="只补跑上一批里异常的站点（离线 / 数据陈旧 / 采集异常 / 未取到 / 截图缺失）；其余站点的截图和状态一点不动，报告按编号就地替换。">
+            ⟳ 只跑异常的 0 台
           </button>
           <button class="btn pri" id="btnRun" onclick="startRun()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.2l11 6.8-11 6.8z"/></svg>
@@ -540,11 +541,19 @@
         <section class="pv">
           <div class="pvh">
             <span>截图预览</span>
-            <span><a class="lk" onclick="openShotDir()">打开文件夹</a><a class="lk" id="pvOpen" style="margin-left:12px" onclick="openShot()">打开原图</a></span>
+            <span style="display:flex;align-items:center">
+              <a class="lk" onclick="openShotDir()">打开文件夹</a>
+              <a class="lk" id="pvOpen" style="margin-left:12px" onclick="openShot()">打开原图</a>
+              <button class="pvre" id="pvRe" onclick="reshotCurrent()"
+                      title="只重拍右边这一台，十几秒出结果；其余站点的截图和报告一个字都不动">
+                ⟳ 重新获取
+              </button>
+            </span>
           </div>
           <div class="pvb" id="pvBody">
             <div class="phold">运行巡站后，这里显示站点截图。<br>单击左侧设备可预览其最新一张。</div>
           </div>
+          <div class="pvrtip" id="pvReTip" style="display:none"></div>
         </section>
       </div>
 
@@ -715,7 +724,10 @@
           <div id="alRuleBox"><div class="empty">加载中…</div></div>
           <div class="arow" style="margin-top:10px">
             <button class="btn" onclick="ruleAdd()">＋ 添加规则</button>
-            <span class="hint">删除：每行最右侧的 ✕；停用：去掉行首勾选。<b>账号、设备名、变量名三个都可以填，也可以从下拉里挑</b>（支持 * 通配，只写几个字也算，如「线路甲」「4号站点」「出水温度」；输入框下方会实时显示能匹配到几个）。条件选「区间内」时阈值填两个数，判定为<b>大于左值且小于右值</b>（两端都不含）。设备读回来的只有纯数字，无需填单位。所有改动需点右上角「保存规则」才生效。</span>
+            <span class="hint">删除：每行最右侧的 ✕；停用：去掉行首勾选。三个框都能填、也能从下拉里挑，但<b>口径不一样</b>：<br>
+              · <b>账号、设备名</b>：填 <b>*</b> = 全部；不带 * 要写<b>全名</b>；想按片段筛就带 *，如「线路甲*」＝名字里含线路甲的那一批，「*有人云」＝名字里带有人云的。账号填的是账号<b>名称</b>（如「线路丙」），不是手机号。<br>
+              · <b>变量名</b>：填 <b>*</b> = 全部；<b>只写几个字＝名字里含这几个字就算</b>（写「温度」，进水温度、回水温度、供水温度都会命中，<b>「风机化霜出水温度」也会带进来</b>）；想只要那一个就<b>前面加 =</b>（「=进水温度」只认全名一字不差的那个，「进水温度T2」不算）；带 * 仍按片段算（「供*T1」命中含「供」或含「T1」的）。<br>
+              输入框下方会实时显示<b>当前是哪种模式</b>、能匹配到几个。条件选「区间内」时阈值填两个数，判定为<b>大于左值且小于右值</b>（两端都不含）。设备读回来的只有纯数字，无需填单位。所有改动需点右上角「保存规则」才生效。</span>
           </div>
           <div id="alDiagBox" style="margin-top:12px"></div>
         </div>
@@ -817,21 +829,8 @@
       </div>
     </div>
   </div>
-  <!-- 截图大图弹窗：点设备行打开，底部可只重拍这一张 -->
-  <div class="mwrap shotm" id="shotModal">
-    <div class="mbox">
-      <div class="mhead"><span id="shotTitle">截图</span>
-        <button class="x" onclick="closeShotModal()" title="关闭">✕</button></div>
-      <div class="shotimg" id="shotBody"></div>
-      <div class="shotfoot">
-        <span class="shotmeta" id="shotMeta"></span>
-        <span style="display:flex;gap:8px;flex:none">
-          <button class="btn" id="shotOpen" onclick="shotOpenFile()">打开原图</button>
-          <button class="btn" id="shotRe" onclick="reshotCurrent()">⟳ 重新获取这张截图</button>
-        </span>
-      </div>
-    </div>
-  </div>
+  <!-- 截图大图弹窗已移除：桌面版右侧就是常驻预览，不再盖一层窗挡住列表。
+       重拍入口在右侧预览头部（#pvRe），右键菜单也走同一套。 -->
 
   <!-- 往期截图清理弹窗 -->
   <div class="mwrap" id="batchModal">
@@ -1520,7 +1519,7 @@
           renderLiveCard(d);                             // 监控页：实时数据卡
           if (W_TAB !== 'live') wTab('live');            // 在异常/规则页签下点站点 → 跳回实时数据
         }
-        else { showPreview(d); openShotModal(d); }   // 巡站页：右侧小预览 + 大图弹窗
+        else { showPreview(d); }                       // 巡站页：直接换右边常驻预览
       };
       box.appendChild(row);
     });
@@ -1605,6 +1604,11 @@
   }
   function showPreview(d) {
     PV_LIVE = null;
+    // 换了一台站：上一台的"已重新获取/重拍失败"提示留着会张冠李戴；
+    // 重拍进行中不清，那条提示要一直说明"现在拍的是哪台"。
+    var same = !!(PVDEV && d && String(PVDEV.no) === String(d.no));
+    if (!same && !SHOT_BUSY) pvTip('');
+    PVDEV = d || null;      // 「⟳ 重新获取」拍的就是这一台
     var body = $('#pvBody');
     if (d.rows && d.rows.length) { renderPreviewCard(d); return; }
     if (d.shot) {
@@ -1615,7 +1619,9 @@
         + '<span style="font-size:11px;color:#B0B5BD">' + esc(d.shot_time || d.age || '') + '</span></div>'
         + '<div class="phname">' + esc(d.name || d.no || '') + '</div>'
         + '<div class="phmeta">' + esc(d.age || '最新一张截图') + '</div>'
-        + '<img class="shot" src="/shot?p=' + encodeURIComponent(d.shot) + '"></div>';
+        + '<img class="shot" title="点一下用系统看图打开原图（可放大）"'
+        + ' onclick="openShot()" src="/shot?p=' + encodeURIComponent(d.shot)
+        + '&t=' + Date.now() + '"></div>';
     } else {
       PV_PATH = null;
       body.innerHTML = '<div class="phold">「' + esc(d.name || d.no || '') + '」暂无截图。<br>勾选账号后点「开始截图」生成。</div>';
@@ -2066,78 +2072,57 @@
     api('/api/openfolder?p=' + encodeURIComponent(PV_PATH.replace(/\/[^/]*$/, '')));
   }
 
-  // ---------- 截图大图弹窗 +「⟳ 重新获取这张截图」----------
-  // 单击设备行 = 打开大图。原来单击只换右边那个小预览，图里的字根本看不清，
-  // 想确认某台到底拍成什么样还得去文件夹里翻。
-  var SMCUR = null;            // 弹窗里当前这台：{no,name,shot,at,status}
+  // ---------- 右侧预览上的「⟳ 刷新这张截图」----------
+  // 桌面版不弹大图窗：右边本来就是常驻预览，再盖一层窗只会挡住列表（用户 2026-11-14 要求）。
+  // 重拍只针对「正在预览的这一台」，进度和失败原因写在预览卡下面那行（#pvReTip），不遮图。
+  var PVDEV = null;                  // 右侧预览当前这台（与设备行同构）
   var SHOT_TICK = null, SHOT_T0 = 0, SHOT_BUSY = false;
+  var SHOT_NO = '', SHOT_NAME = '';  // 正在拍的那台：用户中途切走也能说清拍的是谁
 
   function cnStat(s) {
     return ({ online: '在线', stale: '数据陈旧', offline: '离线',
               blank: '采集异常', unknown: '未取到' })[s] || s || '';
   }
-  function openShotModal(d) {
-    var m = $('#shotModal'); if (!m) return;
-    SMCUR = { no: d.no || '', name: d.name || d.no || '', shot: d.shot || '',
-              at: d.shot_time || '', status: shownStatus(d), acc: accountOf(d) };
-    $('#shotTitle').textContent = SMCUR.name + (SMCUR.no ? ' · ' + SMCUR.no : '');
-    shotPaint(); shotReReset();
-    m.classList.add('show');
+  function pvTip(html) {
+    var t = $('#pvReTip');
+    if (!t) return;
+    if (!html) { t.style.display = 'none'; t.innerHTML = ''; return; }
+    t.style.display = ''; t.innerHTML = html;
   }
-  function closeShotModal() {
-    var m = $('#shotModal'); if (m) m.classList.remove('show');
-    if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
-    SHOT_BUSY = false;
-    // 后台线程不打断：图还在拍，报告照旧会更新；下次打开弹窗直接看到新图
-    SMCUR = null;
-  }
-  function shotPaint(extra) {
-    if (!SMCUR) return;
-    var b = $('#shotBody');
+  function shotBtnReset() {
+    var b = $('#pvRe');
     if (!b) return;
-    if (SMCUR.shot) {
-      // 同名覆盖后文件名不变，必须带时间戳参数，否则浏览器把缓存里的旧图又拿给你看
-      b.innerHTML = '<img id="shotImg" alt="截图" src="/shot?p='
-        + encodeURIComponent(SMCUR.shot) + '&t=' + Date.now() + '">';
-    } else {
-      b.innerHTML = '<div class="shothold">「' + esc(SMCUR.name) + '」这一批里没有截图。<br>'
-        + '点下面「重新获取这张截图」只补拍这一台。</div>';
-    }
-    $('#shotMeta').innerHTML = extra || ('状态 <b>' + esc(SMCUR.status || '未巡') + '</b>'
-      + (SMCUR.at ? ' · 截图于 ' + esc(SMCUR.at) : ''));
-  }
-  function shotReReset() {
-    var b = $('#shotRe'); if (!b) return;
-    b.disabled = false; b.textContent = '⟳ 重新获取这张截图';
+    b.disabled = false;
+    b.textContent = '⟳ 重新获取';
+    b.title = '只重拍右边这一台，十几秒出结果；其余站点的截图和报告一个字都不动';
   }
   function shotElapsed() { return Math.max(0, Math.round((Date.now() - SHOT_T0) / 1000)); }
   function shotBusyPaint(stage) {
-    var b = $('#shotRe'); if (b) b.textContent = '⟳ 重拍中 ' + shotElapsed() + ' 秒…';
-    var m = $('#shotMeta');
-    if (m) m.innerHTML = '<span class="bad">' + esc(stage || '取数据并截图') + '…</span>'
-      + ' 已等 ' + shotElapsed() + ' 秒';
+    var b = $('#pvRe');
+    if (b) { b.disabled = true; b.textContent = '⟳ 重拍中 ' + shotElapsed() + ' 秒…'; }
+    pvTip('<span class="wait">' + esc(stage || '取数据并截图') + '…</span>'
+      + ' 已等 ' + shotElapsed() + ' 秒'
+      + (SHOT_NAME ? ' · 拍的是「' + esc(SHOT_NAME) + '」' : ''));
   }
   function shotFail(msg) {
     if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
     SHOT_BUSY = false;
-    shotReReset();
-    // 失败时不动弹窗里那张图：旧图是有效证据，删掉或换成空白就再也说不清了
-    var m = $('#shotMeta');
-    if (m) m.innerHTML = '<span class="bad">重拍失败：' + esc(msg) + '</span> · 旧图原样保留';
-  }
-  function shotOpenFile() {
-    if (SMCUR && SMCUR.shot) api('/api/open?p=' + encodeURIComponent(SMCUR.shot));
+    shotBtnReset();
+    // 失败时不动预览里那张图：旧图是有效证据，删掉或换成空白就再也说不清了
+    pvTip('<span class="bad">重拍失败：' + esc(msg) + '</span> · 旧图原样保留'
+      + (SHOT_NAME ? ' · 「' + esc(SHOT_NAME) + '」' : ''));
   }
   function reshotCurrent() {
     if (DEMO) { toast('演示模式：请通过 Electron 启动后再重拍'); return; }
-    if (!SMCUR || SHOT_BUSY) return;
-    if (!SMCUR.no) { toast('这一台没有设备编号，没法按编号重拍'); return; }
+    if (SHOT_BUSY) { toast('还有一张在拍，等它出来再拍这张'); return; }
+    if (!PVDEV) { toast('先在左边点一台站点，再点这里重拍'); return; }
+    if (!PVDEV.no) { toast('这一台没有设备编号，没法按编号重拍'); return; }
     SHOT_BUSY = true; SHOT_T0 = Date.now();
-    var b = $('#shotRe'); if (b) b.disabled = true;
+    SHOT_NO = PVDEV.no; SHOT_NAME = PVDEV.name || PVDEV.no;
     shotBusyPaint('提交重拍…');
     // 只发请求、不等结果：真拍一台要十几秒，同步等会把整个界面卡住
     api('/api/reshot', { method: 'POST', body: JSON.stringify({
-      no: SMCUR.no, batch: LAST_BATCH || '' }) })
+      no: SHOT_NO, batch: LAST_BATCH || '' }) })
       .then(function (j) {
         if (!j || !j.ok) { shotFail((j && j.msg) || '重拍请求没发出去'); return; }
         if (SHOT_TICK) clearInterval(SHOT_TICK);
@@ -2146,44 +2131,64 @@
       })
       .catch(function () { shotFail('后端未连接'); });
   }
+  // 右键入口：设备行右键 →「⟳ 刷新这张截图」。先把右边预览切到这台再拍，
+  // 和点「⟳ 重新获取」完全同一条路：进度和失败原因都看得见，不另开一套静默重拍。
+  function reshotByNo(no) {
+    if (DEMO) { toast('演示模式：请通过 Electron 启动后再重拍'); return; }
+    if (SHOT_BUSY) { toast('还有一张在拍，等它出来再拍这张'); return; }
+    var d = null;
+    for (var i = 0; i < CUR_DEVS.length; i++) {
+      if (CUR_DEVS[i] && String(CUR_DEVS[i].no) === String(no)) { d = CUR_DEVS[i]; break; }
+    }
+    if (!d) { toast('当前列表里没找到这台站点'); return; }
+    markRow(no);            // 左边选中态跟着走：右边显示的就是要拍的那台
+    showPreview(d);
+    reshotCurrent();
+  }
+  /* 让左边这一行变成选中态（右键入口用：右边显示什么，左边就选什么） */
+  function markRow(no) {
+    var rows = $$('#devList .drow'), hit = null;
+    rows.forEach(function (r) {
+      if (r.getAttribute('data-no') === String(no)) { r.classList.add('on'); hit = r; }
+      else r.classList.remove('on');
+    });
+    if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: 'nearest' });
+  }
   function shotPoll() {
     api('/api/reshotstat').then(function (j) {
       if (!j || !j.ok) return;
       if (j.busy) { shotBusyPaint(j.stage); return; }        // 还在拍：按钮上走秒
       if (SHOT_TICK) { clearInterval(SHOT_TICK); SHOT_TICK = null; }
       SHOT_BUSY = false;
-      if (!SMCUR) return;         // 弹窗关了：结果已经写进报告，下次打开能看到
       if (j.err) { shotFail(j.err); return; }
       shotApply(j);
     }).catch(function () {});
   }
   function shotApply(j) {
-    var no = SMCUR.no;
+    var no = SHOT_NO;
     // 报告里的账号目录和文件名只有后端知道，回来问一次（纯读磁盘，不再敲平台）
     api('/api/shotof?no=' + encodeURIComponent(no)).then(function (k) {
-      if (!SMCUR || SMCUR.no !== no) return;
       if (!k || !k.ok) { shotFail('拍完了，但读不到报告条目'); return; }
       var ent = k.entry || {};
       var rel = (k.batch + '/' + k.acc_dir + '/' + (ent.file || '')).replace(/\\/g, '/');
-      SMCUR.shot = rel;
-      SMCUR.at = ent.at || j.at || '';
-      SMCUR.status = cnStat(ent.status) || SMCUR.status;
-      shotPaint('<span class="ok">已重新获取</span>'
-        + (SMCUR.at ? ' · ' + esc(SMCUR.at) : '')
-        + ' · 状态 <b>' + esc(SMCUR.status) + '</b>');
-      shotReReset();
-      patchShotRow(no, ent, rel);
+      var at = ent.at || j.at || '';
+      var st = cnStat(ent.status);
+      shotBtnReset();
+      pvTip('<span class="ok">已重新获取</span>'
+        + (at ? ' · ' + esc(at) : '') + ' · 状态 <b>' + esc(st) + '</b>'
+        + ' · 「' + esc(SHOT_NAME || no) + '」');
+      patchShotRow(no, ent, rel, at, st);
       loadEmptyCount();          // 这台补上了，按钮上的数字要跟着减
     }).catch(function () { shotFail('拍完了，但读取报告失败'); });
   }
   /* 只改这一行。整表重画会把滚动位置和选中态都弄丢，用户还会以为列表被换成了别的站。 */
-  function patchShotRow(no, ent, rel) {
+  function patchShotRow(no, ent, rel, at, stTxt) {
     var d = null;
     (CUR_DEVS || []).forEach(function (x) { if (x.no === no) d = x; });
     if (d) {
       if (rel) d.shot = rel;
-      if (ent.at) d.shot_time = ent.at;
-      var s = cnStat(ent.status); if (s) d.status = s;
+      if (at) d.shot_time = at;
+      var s = stTxt || cnStat(ent.status); if (s) d.status = s;
       var age = ent.age || '';
       if (!age) { var m = /数据(.+)$/.exec(ent.preview || ''); age = m ? m[1] : ''; }
       if (age) d.age = age;
@@ -2192,13 +2197,14 @@
     var box = $('#devList');
     var row = (box && box.querySelector) ? box.querySelector('.drow[data-no="' + no + '"]') : null;
     if (row) {
-      var st = d ? shownStatus(d) : cnStat(ent.status);
+      var st = d ? shownStatus(d) : (stTxt || cnStat(ent.status));
       var sEl = row.querySelector('.st');
       if (sEl) sEl.innerHTML = '<i class="dot" style="background:' + statusColor(st) + '"></i>' + esc(st);
       var aEl = row.querySelector('.age');
       if (aEl) aEl.textContent = d ? ageText(d) : (ent.age || '');
     }
-    if (d && PV_PATH) showPreview(d);   // 右侧小预览也换成新图
+    // 右侧正看着这台才重画预览；用户早切到别的站了，就别把他的画面换掉
+    if (d && PVDEV && String(PVDEV.no) === String(no)) showPreview(d);
   }
 
 
@@ -2226,22 +2232,34 @@
     api('/api/pause', { method: 'POST' }).then(function () { $('#btnPause').textContent = '已暂停'; });
   }
 
-  // ---------- 「⟳ 只跑没数据的 N 台」----------
-  // N 只统计上一批报告里状态是离线 / 采集异常 / 没取到，或者截图文件不见了的站；
-  // 「数据陈旧」算有数据，不算进来。数字由后端读报告算，页面每刷新一次都是同一口径。
-  var EMPTY_N = 0, EMPTY_BATCH = '';
+  // ---------- 「⟳ 只跑异常的 N 台」----------
+  // N 统计上一批报告里状态是离线 / 数据陈旧 / 采集异常 / 没取到，或者截图文件不见了的站。
+  // 数据陈旧也算：平台只留最后一次上报值，8 天没更新的站画面上的数字是假的，跟真离线一回事；
+  // 补跑一次还有机会拿到设备刚恢复的新值。分类数字由后端读报告算，页面每次刷新都是同一口径。
+  var EMPTY_N = 0, EMPTY_BATCH = '', EMPTY_KINDS = {};
+  var KIND_CN = { offline: '离线', stale: '数据陈旧', blank: '采集异常',
+                  unknown: '未取到', missing: '截图丢了' };
+  function kindText(k) {
+    var order = ['offline', 'stale', 'blank', 'unknown', 'missing'], out = [];
+    for (var i = 0; i < order.length; i++) {
+      var n = k && k[order[i]];
+      if (n) out.push(KIND_CN[order[i]] + ' ' + n);
+    }
+    return out.join(' · ');
+  }
   function loadEmptyCount() {
     api('/api/emptycount').then(function (j) {
       var b = $('#btnEmpty');
       EMPTY_N = (j && j.ok) ? (j.total || 0) : 0;
       EMPTY_BATCH = (j && j.batch) || '';
+      EMPTY_KINDS = (j && j.kinds) || {};
       if (!b) return;
       if (EMPTY_N > 0) {
         b.style.display = '';
-        b.textContent = '⟳ 只跑没数据的 ' + EMPTY_N + ' 台';
-        b.title = '只补跑 ' + (EMPTY_BATCH || '上一批') + ' 里没数据的 ' + EMPTY_N
-          + ' 台（离线 / 采集异常 / 没取到 / 截图缺失）。其余站点的截图和状态一点不动，'
-          + '报告按设备编号就地替换，跑完仍打同一个压缩包。';
+        b.textContent = '⟳ 只跑异常的 ' + EMPTY_N + ' 台';
+        b.title = '只补跑 ' + (EMPTY_BATCH || '上一批') + ' 里状态不对的 ' + EMPTY_N
+          + ' 台（' + (kindText(EMPTY_KINDS) || '离线 / 数据陈旧 / 采集异常 / 没取到 / 截图丢了') + '）。'
+          + '其余站点的截图和状态一点不动，报告按设备编号就地替换，跑完仍打同一个压缩包。';
       } else {
         b.style.display = 'none';
       }
@@ -2249,7 +2267,7 @@
   }
   function startEmptyRun() {
     if (DEMO) { toast('演示模式：请通过 Electron 启动以执行巡站'); return; }
-    if (!EMPTY_N) { toast('上一批没有「没数据」的站点'); return; }
+    if (!EMPTY_N) { toast('上一批没有要补跑的站点'); return; }
     var b = $('#btnEmpty');
     if (b) b.disabled = true;
     api('/api/run', { method: 'POST', body: JSON.stringify({
@@ -2421,8 +2439,11 @@
     if (!rs.length) {
       box.innerHTML = '<div class="ahint" style="margin:0">暂无自定义规则（当前只有内置的数据停更规则在生效）。'
         + '需要按水温、压力等具体数值报警时，点下方「添加规则」。'
-        + '变量名支持 * 通配，也可只填几个字（如 <b>供水温度</b>、<b>进水温度</b> 都能识别），'
-        + '输入框下方会实时显示能否匹配上；本轮读到的数据一旦越过阈值就立刻提醒，无需等待。担心数值抖动可用「区间内」留出余量。</div>';
+        + '<b>变量名</b>：填 <b>*</b> = 全部；只写几个字＝名字里含这几个字就算'
+        + '（写「温度」会把「风机化霜出水温度」也带进来）；想只要那一个就前面加 =，'
+        + '如 <b>=进水温度</b> 只认全名一字不差的那个；带 * 按片段算（「供*T1」）。'
+        + '输入框下方会实时显示当前模式能匹配到几个；本轮读到的数据一旦越过阈值就立刻提醒，'
+        + '无需等待。担心数值抖动可用「区间内」留出余量。</div>';
       return;
     }
     // 'between' = 区间内（大于左值且小于右值），阈值列会展开成两个输入框
@@ -2446,12 +2467,18 @@
         + 'this.closest(\'tr\').className=this.checked?\'\':\'off\'"></td>'
         + '<td><input type="text" value="' + esc(r.name || '') + '" oninput="__ruleField(' + i + ',\'name\',this.value)"></td>'
         + '<td><input type="text" list="alAccts" value="' + esc(accPat) + '"'
-        + ' title="可从下拉选择，也可只填几个字（如 线路甲）或写 * 表示全部账号"'
+        + ' title="填 * = 全部账号；不带 * 要写账号全名（如 线路丙）；想按片段筛写 线路甲*"'
         + ' oninput="__ruleField(' + i + ',\'account\',this.value);__ruleAcctHint(' + i + ')"></td>'
         + '<td><input type="text" list="alDevs' + i + '" value="' + esc(r.device || '*') + '"'
-        + ' title="可从下拉选择，也可只填几个字（如 4号站点、5号站点 都能识别）；* = 全部设备"'
+        + ' title="填 * = 全部设备；不带 * 要写设备全名；想按线路/片区筛写成 线路甲* 这样的片段"'
         + ' oninput="__ruleField(' + i + ',\'device\',this.value);__ruleDevHint(' + i + ')"></td>'
-        + '<td><input type="text" list="alPts" value="' + esc(r.point || '*') + '" title="可从下拉选择，也可只填几个字，如 供水温度、进水温度 都能识别" oninput="__ruleField(' + i + ',\'point\',this.value);__rulePointHint(' + i + ')"></td>'
+        // 变量名：data-dl 而不是 list —— list 会挂上浏览器原生联想（输入时弹一串历史值，
+        // 点一下就填错），自绘下拉只需要这张清单，不需要原生那一层。
+        + '<td><input type="text" data-dl="alPts" autocomplete="off"'
+        + ' value="' + esc(pointShown(r)) + '"'
+        + ' placeholder="温度 或 =进水温度 或 *"'
+        + ' title="填 * = 全部；只写几个字＝名字里含这几个字就算；前面加 = ＝一字不差；带 * ＝片段匹配（命中任一段即可）"'
+        + ' oninput="__ruleField(' + i + ',\'point\',this.value);__rulePointHint(' + i + ')"></td>'
         + '<td><select onchange="__ruleField(' + i + ',\'op\',this.value);__ruleRepaint()">'
         + ops.map(function (o) {
             return '<option value="' + o + '"' + (o === (r.op || '<') ? ' selected' : '') + '>'
@@ -2497,15 +2524,61 @@
   function __ruleEsc(s) {
     return String(s).replace(/[.+?^${}()|[\]\\]/g, '\\$&');
   }
+  function __ruleSplitFrag(pat, s) {
+    var segs = pat.split('*').filter(function (x) { return String(x).trim(); });
+    if (!segs.length) return true;                     // 形如「**」，等于全部
+    for (var i = 0; i < segs.length; i++) {
+      if (String(s).indexOf(segs[i]) >= 0) return true;
+    }
+    return false;
+  }
+  // 账号 / 设备名：与后端 _wmatch 同口径（2026-11-14 定稿）。
+  //   * 或空 → 全部；不带 * → 全名一字不差；带 * → 按 * 切段，命中任一段就算（OR）。
+  // **不是**「半截名自动包含」—— 那是一个框两种语义，用户没法表达"就要这一个"。
   function __ruleMatchOne(pat, s) {
-    if (!pat || pat === '*') return true;
-    pat = String(pat); s = String(s || '');
-    var rx = __ruleEsc(pat).replace(/\*/g, '.*');
-    if (new RegExp('^' + rx + '$').test(s)) return true;
-    var core = pat.replace(/\*/g, '').replace(/^\s+|\s+$/g, '');
-    if (!core) return true;
-    if (core.length < 2) return false;// 单字不宽松，避免错配
-    return core.indexOf(s) >= 0 || s.indexOf(core) >= 0;
+    var v = String(pat == null ? '' : pat).trim();
+    if (!v || v === '*') return true;
+    s = String(s == null ? '' : s).trim();
+    if (v.indexOf('*') >= 0) return __ruleSplitFrag(v, s);
+    return s === v;
+  }
+  // 变量名：与后端 match_var_name 同口径。
+  //   * → 全部；exact（框里写了 =）→ 全名一字不差；带 * → 片段 OR；其余 → 部分包含（单向）。
+  //   传进来的 pat 带不带前导 = 都得对：正常链路是 __rulePointParse 先剥，
+  //   但少剥一次就静默不命中，那种错没有报错、只有"规则不触发"，所以这里自己也兜一层。
+  function __ruleMatchVar(pat, s, exact) {
+    var v = String(pat == null ? '' : pat).trim();
+    if (!v || v === '*') return true;
+    s = String(s == null ? '' : s).trim();
+    if (exact) {
+      if (v.charAt(0) === '=') {
+        v = v.slice(1).replace(/^\s+|\s+$/g, '');
+        if (!v || v === '*') return true;   // 只写了个「=」：想说的是"不筛"
+      }
+      return s === v;
+    }
+    if (v.indexOf('*') >= 0) return __ruleSplitFrag(v, s);
+    return s.indexOf(v) >= 0;
+  }
+  // 变量名框里的那一串怎么读。只写了一个 = 后面没名字 → 退回「全部」，
+  // 不能当成「完全一致且名字为空」（那种规则谁都命中不了，还不报错）。
+  function __rulePointParse(raw) {
+    var v = String(raw == null ? '' : raw).trim();
+    if (!v || v === '*') return { pat: '*', exact: false, mode: 'all' };
+    if (v.charAt(0) === '=') {
+      var nm = v.slice(1).replace(/^\s+|\s+$/g, '');
+      // 「=」后面没名字、或就写了「=*」：都是"不筛"。与后端 parse_point 同一口径。
+      return (nm && nm !== '*') ? { pat: nm, exact: true, mode: 'exact' }
+                                : { pat: '*', exact: false, mode: 'all' };
+    }
+    if (v.indexOf('*') >= 0) return { pat: v, exact: false, mode: 'frag' };
+    return { pat: v, exact: false, mode: 'contains' };
+  }
+  // 渲染输入框时把模式还原成 = 前缀（落盘是 point + var_exact 两个字段）
+  function pointShown(r) {
+    var p = String((r && r.point != null) ? r.point : '*');
+    if (!p) p = '*';
+    return (r && r.var_exact && p.charAt(0) !== '=') ? ('=' + p) : p;
   }
   // ---- 规则页三个字段（账号 / 设备名 / 变量名）的候选下拉 ----
   // 数据源就是各自的 <datalist>（后端 catalog 给的清单），这里只负责"点一下能看见"。
@@ -2520,8 +2593,12 @@
     }
     return RC_EL;
   }
+  // 变量名框用 data-dl（故意不挂 list：list 会带出浏览器原生联想），其余框仍用 list
+  function rcAttr(el) {
+    return (el && el.getAttribute && (el.getAttribute('list') || el.getAttribute('data-dl'))) || '';
+  }
   function rcDataList(el) {
-    var dl = document.getElementById(el.getAttribute('list') || '');
+    var dl = document.getElementById(rcAttr(el));
     if (!dl) return [];
     return $$('option', dl).map(function (o) { return o.value; });
   }
@@ -2529,7 +2606,7 @@
   // （首屏点进异常提醒页时更常见），那一刻三张候选表都是空的，而且之后没有任何东西
   // 会去补它们 —— 表现就是「点开输入框什么都没有」。点开输入框这一刻重建一次最稳。
   function rcRefreshFor(el) {
-    var l = (el.getAttribute && el.getAttribute('list')) || '';
+    var l = rcAttr(el);
     try {
       if (l === 'alAccts') { __ruleAcctDatalist(); }
       else if (l === 'alPts') { __rulePointDatalist(); }
@@ -2541,7 +2618,7 @@
     } catch (e) { /* ignore */ }
   }
   function rcIsRuleInput(el) {
-    return !!(el && el.tagName === 'INPUT' && el.getAttribute && el.getAttribute('list')
+    return !!(el && el.tagName === 'INPUT' && rcAttr(el)
       && el.closest && el.closest('#alRuleBox'));
   }
   function rcClose() {
@@ -2573,15 +2650,31 @@
     var pat = String(el.value || '').trim();
     RC_INPUT = el;
     RC_IDX = -1;
-    RC_ITEMS = (pat && pat !== '*')
-      ? all.filter(function (n) { return __ruleMatchOne(pat, n); })
-      : all;
+    var isPoint = rcAttr(el) === 'alPts';
+    var pv = isPoint ? __rulePointParse(pat) : null;
+    if (pv ? pv.mode === 'all' : (!pat || pat === '*')) {
+      RC_ITEMS = all;
+    } else if (pv && pv.mode === 'exact') {
+      // 完全一致模式下候选是"补全"，不是"筛选"：先给全名正好相等的，
+      // 没有就退一步给含这几个字的 —— 否则刚敲到「=进水」时候选永远是空的，
+      // 一个名字都点不到。点选后填的是「=全名」，粒度仍是完全一致。
+      var eq = all.filter(function (n) { return n === pv.pat; });
+      RC_ITEMS = eq.length ? eq : all.filter(function (n) { return n.indexOf(pv.pat) >= 0; });
+    } else {
+      RC_ITEMS = all.filter(function (n) {
+        return pv ? __ruleMatchVar(pv.pat, n, false) : __ruleMatchOne(pat, n);
+      });
+    }
     if (!RC_ITEMS.length) { rcClose(); return; }
     rcRender();
   }
   function rcPick(v) {
     var el = RC_INPUT;
     if (!el) return;
+    // 变量名框里用户已经写了「=」，点候选只是换名字，粒度不能丢
+    if (rcAttr(el) === 'alPts' && String(el.value || '').trim().charAt(0) === '=') {
+      v = '=' + v;
+    }
     el.value = v;
     try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) { }
     try { el.focus(); } catch (e) { }
@@ -2623,6 +2716,13 @@
   window.addEventListener('resize', function () { if (RC_INPUT) rcRender(); });
   document.addEventListener('scroll', function () { if (RC_INPUT) rcRender(); }, true);
 
+  // 三个匹配函数导出到 window：自动化测试直接喂用例验算（不必去爬闭包），
+  // 也能和 Python 侧 match_var_name / _wmatch 做跨端一致性比对。
+  window.__ruleMatchOne = __ruleMatchOne;
+  window.__ruleMatchVar = __ruleMatchVar;
+  window.__rulePointParse = __rulePointParse;
+  window.pointShown = pointShown;
+
   window.__rulePointHint = function (i) {
     var rs = (RULES && RULES.rules) || [];
     var row = document.querySelector('#alRuleBox tbody tr:nth-child(' + (i + 1) + ')');
@@ -2631,30 +2731,47 @@
     //   0启用 1规则名 2账号 3设备名 4变量名 5条件 6阈值 7级别 8操作
     // 写死children[5] 会把提示插到「条件」列去——页面上仍然渲染得出来，
     // 只是位置错了，肉眼很难发现。按表头文字定位，插错列/加列都会立刻暴露。
-    var cell = null, tds = row.children;
+    var cell = null, tds = row.children, inp = null;
     for (var k = 0; k < tds.length; k++) {
-      var inp = tds[k].querySelector('input[list="alPts"]');
-      if (inp) { cell = tds[k]; break; }
+      var q = tds[k].querySelector('input[data-dl="alPts"]');
+      if (q) { cell = tds[k]; inp = q; break; }
     }
     if (!cell) return;
     var old = cell.querySelector('.pthint');
     if (old) old.remove();
+    // 以**输入框里的实际值**为准：刚敲下 = 还没保存，提示也得立刻跟着变
+    var raw = (inp && inp.value != null) ? inp.value : (rs[i].point || '*');
+    var pv = __rulePointParse(raw);
     var all = (WC && WC.points) || [];
-    var pat = String(rs[i].point || '*');
-    if (pat === '*' || !all.length) return;
-    var hits = all.filter(function (p) { return __ruleMatchOne(pat, p); });
+    var head;
+    if (pv.mode === 'all') head = '当前：全部变量';
+    else if (pv.mode === 'exact') head = '当前：完全一致，只认「' + pv.pat + '」这一个变量名';
+    else if (pv.mode === 'frag') head = '当前：片段匹配，* 分开的词命中任一个即可';
+    else head = '当前：部分包含，名字里含「' + pv.pat + '」就行';
     var d = document.createElement('div');
     d.className = 'pthint';
-    if (hits.length) {
+    if (pv.mode === 'all') {
       d.classList.add('ok');
-      var shown = hits.slice(0, 3).map(function (h) { return esc(h); }).join('、');
-      d.innerHTML = '✓ 匹配到 ' + hits.length + ' 个：' + shown
-        + (hits.length > 3 ? ' 等' : '');
+      d.innerHTML = head + (all.length ? '（这批设备共 ' + all.length + ' 个）' : '');
+    } else if (!all.length) {
+      // 清单还没拉回来：只说模式，别谎称"匹配到 0 个"（那是 catalog 没到，不是写错了）
+      d.classList.add('ok');
+      d.innerHTML = head;
     } else {
-      d.classList.add('bad');
-      d.innerHTML = '✕ 没匹配上，这批设备实际有：'
-        + all.slice(0, 4).map(function (h) { return esc(h); }).join('、')
-        + (all.length > 4 ? ' 等' : '');
+      var hits = all.filter(function (p) { return __ruleMatchVar(pv.pat, p, pv.exact); });
+      if (hits.length) {
+        d.classList.add('ok');
+        d.innerHTML = head + ' · 匹配到 ' + hits.length + ' 个：'
+          + hits.slice(0, 3).map(function (h) { return esc(h); }).join('、')
+          + (hits.length > 3 ? ' 等' : '');
+        d.title = hits.join('\n');
+      } else {
+        d.classList.add('bad');
+        d.innerHTML = '✕ ' + head + '，但这批设备没有这个名字。实际有：'
+          + all.slice(0, 4).map(function (h) { return esc(h); }).join('、')
+          + (all.length > 4 ? ' 等' : '');
+        d.title = all.join('\n');
+      }
     }
     cell.appendChild(d);
   };
@@ -2681,9 +2798,9 @@
   // 设备名以前是个死下拉框：只能从"已加载的设备"里挑，想写不在清单里的站、
   // 或只写几个字（如「4号站点」）都没法写。现在跟变量名一样可填可挑。
   // 某个账号范围下有哪些设备——设备名的候选表与提示都用它，保证两边一致。
-  // ⚠ 账号列允许写通配/半截名字（如 "*有人云"、"线路甲"），所以这里必须用 __ruleMatchOne
+  // ⚠ 账号列允许写片段（如 "*有人云"、"线路甲*"），所以这里必须用 __ruleMatchOne
   // 判断「设备属于不属于这个账号」，不能用 d.acc === accPat：
-  // 用精确相等的话，账号一旦写成通配，候选和提示就都是空的（下拉点不出来）。
+  // 用精确相等的话，账号一旦写成片段，候选和提示就都是空的（下拉点不出来）。
   function __ruleDevsFor(accPat) {
     var out = [];
     if (WC) {
@@ -2818,13 +2935,14 @@
         // 变量名一个都没对上。必须把该设备实际有的变量名列出来 ——
         // 只说「可能写错了」，用户根本不知道该填什么，只能靠猜。
         var pts = d.dev_points && d.dev_points.length ? d.dev_points : null;
-        txt = '变量名「' + (r.point || '*') + '」一个都没匹配上'
+        txt = '变量名「' + pointShown(r) + '」一个都没匹配上'
           + (pts ? '。这台设备实际有：' + pts.map(esc).join('、')
-                  + '（可只填其中几个字，或从下拉里选）'
+                  + '（只写几个字＝名字里含就算；要一字不差就在前面加 =）'
                   : '，且该设备没读到任何变量（可能设备离线或未上电）');
         cls = 'dg-bad';
       } else if (d.scanned === 0) {
-        txt = '账号/设备名筛选没匹配到设备'; cls = 'dg-bad';
+        txt = '账号/设备名筛选没匹配到设备（这两个框不带 * 要写全名；'
+          + '想按片段筛写成「线路甲*」这样）'; cls = 'dg-bad';
       } else {
         // near_read 是当时的实际读数，near_gap 是差值 —— 两个别混用，
         // 之前这里拿差值当读数显示，写成「最接近的是 24.5」，会让人误以为读数就是 24.5。
@@ -3979,7 +4097,7 @@
   }
   function closeSiteModal() { $('#siteModal').classList.remove('show'); }
   $('#siteModal').onclick = function (e) { if (e.target === this) closeSiteModal(); };
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); closeShotModal(); if (window.closePinModal) window.closePinModal(); } });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeSiteModal(); closeBatchModal(); if (window.closePinModal) window.closePinModal(); } });
 
   // ---------- 往期截图清理 ----------
   var BATCHES = [], BM_SEL = {}, BM_ARM = false, BM_LATEST = '', BM_CUR = '';
@@ -4107,7 +4225,6 @@
       });
   }
   $('#batchModal').onclick = function (e) { if (e.target === this) closeBatchModal(); };
-  $('#shotModal').onclick = function (e) { if (e.target === this) closeShotModal(); };
   function smAll(v) { $$('#smList input[type=checkbox]').forEach(function (c) { c.checked = v; }); }
   function smOk() {
     var cbs = $$('#smList input[type=checkbox]');
@@ -4282,9 +4399,8 @@
   window.pauseRun = pauseRun;
   window.startRun = startRun;
   window.startEmptyRun = startEmptyRun;     // 「⟳ 只跑没数据的 N 台」
-  window.closeShotModal = closeShotModal;  // 截图大图弹窗
-  window.shotOpenFile = shotOpenFile;
   window.reshotCurrent = reshotCurrent;
+  window.reshotByNo = reshotByNo;      // 右键「⟳ 刷新这张截图」走这里
   window.openShot = openShot;
   window.openShotDir = openShotDir;
   window.quitApp = quitApp;
@@ -4368,6 +4484,10 @@
         refreshDevices(false);                 // 用 60 秒缓存重画，不为了改顺序再打一次接口
         paintPins();                           // 设置页的置顶清单同步（右键和设置是同一份数据）
         toast(on ? '已置顶「' + (d.name || d.no) + '」' : '已取消置顶「' + (d.name || d.no) + '」');
+        return;
+      }
+      if (kind === 'reshot') {                 // 右键：只重拍这一台的截图
+        reshotByNo(val);
         return;
       }
       if (kind === 'refresh') {                // 刷新这台设备的实时数据

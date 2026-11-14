@@ -270,20 +270,25 @@ def _zip_of_batch(name):
     return os.path.join(BASE, '有人云巡站截图_{}.zip'.format(name[:-len('_截图')]))
 
 
-# 「没数据」的口径：报告里状态是离线 / 采集异常 / 未取到，或者对应 png 不见了。
-# 数据陈旧算有数据 —— 它只是旧，不是没有。
-EMPTY_STATUS = ('offline', 'blank', 'unknown')
+# 「要补跑」的口径：报告里状态是离线 / 数据陈旧 / 采集异常 / 未取到，或者对应 png 不见了。
+# 数据陈旧必须算进来：平台只保留最后一次上报值，一台 8 天没更新的站，画面上那几个数字是
+# 假的，和真离线是一回事（judge_status 的注释也是这么定的）。补跑一次还有机会拿到刚恢复的新值，
+# 不跑就永远不知道它醒没醒。
+EMPTY_STATUS = ('offline', 'stale', 'blank', 'unknown')
 
 
 def _empty_devices():
-    """统计上一批里「没数据」的站点，按账号分组，键是批次里的账号目录名。
+    """统计上一批里「要补跑」的站点，按账号分组，键是批次里的账号目录名。
 
     只读报告 + 磁盘，不请求平台：一次点击就能立刻告诉用户「有几台要补」。
+    kinds 是分类计数，界面上把「离线 5 · 数据陈旧 3」直接摊开写进按钮提示，
+    免得用户看到一个总数却不知道是怎么来的。
     """
     b = _latest_batch()
     if not b:
-        return {'batch': None, 'by_acc': {}, 'total': 0}
+        return {'batch': None, 'by_acc': {}, 'total': 0, 'kinds': {}}
     by_acc = {}
+    kinds = {}
     try:
         entries = sorted(os.listdir(b))
     except Exception:
@@ -303,12 +308,16 @@ def _empty_devices():
                 continue          # 老报告没有编号：没法按编号补跑，跳过（不猜站名）
             f = str(it.get('file') or '')
             miss = bool(f) and not os.path.isfile(os.path.join(adir, f))
-            if it.get('status') in EMPTY_STATUS or miss:
+            st = it.get('status')
+            if st in EMPTY_STATUS or miss:
                 nos.append(no)
+                # 图丢了但报告说在线，单独记成 missing，不混进设备状态里
+                k = st if st in EMPTY_STATUS else 'missing'
+                kinds[k] = kinds.get(k, 0) + 1
         if nos:
             by_acc[aname] = nos
     return {'batch': os.path.basename(b), 'by_acc': by_acc,
-            'total': sum(len(v) for v in by_acc.values())}
+            'total': sum(len(v) for v in by_acc.values()), 'kinds': kinds}
 
 
 def _batch_rows():
@@ -1367,10 +1376,14 @@ class Handler(BaseHTTPRequestHandler):
             stem = f[:-4]
             parts = stem.split('_', 2)
             if len(parts) == 3:
+                # 异常站点的 png 名字末尾带 [离线] / [数据陈旧] 之类标记，
+                # 比对前先剥掉：不然「某某站[离线]」和报告里的「某某站」对不上，
+                # 界面上就变成「这一批里没有截图」了。index 里仍存带标记的整名（要给 <img> 用）。
+                dev_key = R.strip_file_tag(parts[2])
                 # 同名取时间戳最新（前缀时间戳同长，字符串比较即时间序）
-                if parts[2] not in index or stem > index[parts[2]]:
-                    index[parts[2]] = stem
-                for c in codes(parts[2]):
+                if dev_key not in index or stem > index[dev_key]:
+                    index[dev_key] = stem
+                for c in codes(dev_key):
                     old = index.get(c)
                     if not old or stem > old:
                         index[c] = stem
@@ -1584,10 +1597,10 @@ class Handler(BaseHTTPRequestHandler):
             ST['workers'] = w
 
         if body.get('only_empty'):
-            # 只补跑上一批里「没数据」的那些站：复用原批次目录，不新建
+            # 只补跑上一批里「要补」的那些站：复用原批次目录，不新建
             info = _empty_devices()
             if not info['total']:
-                return self._err('上一批里没有「没数据」的站点，不用补跑')
+                return self._err('上一批里没有要补跑的站点，不用补')
             accs = R.load_accounts()
             # 报告里的目录名是 safe_name(账号名)，这里要按同一套规则对回去
             pair = [(a, R.safe_name(a['name'])) for a in accs]

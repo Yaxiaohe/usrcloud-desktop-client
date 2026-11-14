@@ -77,36 +77,83 @@ ST_TEXT = {'online': '在线', 'stale': '数据陈旧',
 
 
 def _wmatch(pat, s):
-    """规则里的账号/设备名/变量名匹配。返回 True/False。
+    """账号 / 设备名的匹配。**口径与变量名不同**，别混用（变量名见 match_var_name）。
 
-    为什么要放宽：设备返回的变量名是「供水温度T1」这种带编码的机器名，
-    而人写规则时习惯只写「供水温度」四个字。原来只做「归一化后完全相等」，
-    等于要求用户去背设备编码 —— 而且匹配不上**不报错**，
-    只表现为「规则永远不触发」，是最难查的一类故障。
+    2026-11-14 定稿（手机版 v0.39 同口径）：这两个框只认两件事 ——
 
-    规则只有两条，都按字面来，**不做同义词猜测**：
-      1. 精确 / 通配：完全相等，或 * 通配（原行为，一字不改）
-      2. 双向包含：去掉 * 后的词，与实际变量名互为子串
-         · 写「供水温度」→ 命中「供水温度T1」  ✓
-         · 写「回水温度」→ **不**命中「供水温度T1」（互不为子串）✓
+      · 填 * 或留空   → 全部
+      · 不带 *        → 全名一字不差才算
+      · 带 *          → 按 * 切成几段，命中任一段就算（OR，不是"每段都要有"）
+                        「线路甲*」= 名字里含线路甲的那一批；「*有人云」= 名字里带有人云的
 
-    长度下限 2 是刻意设的：单字「温」会同时命中所有温度类变量，
-    那是错配而不是匹配，比匹配失败更危险。
+    为什么不再做「双向包含」：一个框里塞两种语义（半截名也认、又认全名），
+    用户没法表达"我就要这一个"，提示也写不准。现在语义单一、说明写得出来。
+    账号匹配的是账号**名称**（如「线路丙」），不是手机号。
     """
-    if not pat or pat == '*':
+    if not pat or str(pat).strip() in ('', '*'):
         return True
-    pat, s = str(pat), str(s or '')
-    # 1) 精确 / 通配（保持原语义）
-    rx = re.escape(pat).replace(r'\*', '.*')
-    if re.fullmatch(rx, s) is not None:
+    pat, s = str(pat).strip(), str(s or '').strip()
+    if '*' in pat:
+        segs = [x for x in pat.split('*') if x.strip()]
+        if not segs:
+            return True                 # 形如「**」，等于全部
+        return any(seg in s for seg in segs)
+    return s == pat
+
+
+def match_var_name(pat, s, exact=False):
+    """变量名匹配。纯函数、零依赖，边界表见 verify/test_varmatch.py（9 组逐条验算）。
+
+      · * 或留空                → 全部变量
+      · exact=True（框里写 =x） → 全名一字不差才算
+      · 含 *                    → 片段 OR：「供*T1」命中含「供」或含「T1」的
+      · 其余                    → 部分包含：名字里含这几个字就算
+
+    默认必须是「部分包含」：平台上的变量名常带编码（「进水温度T2」「1#进水温度」），
+    写死全名会让规则永远不触发，而且**不报错**，是最难查的一类故障。
+    用户想收窄时自己在前面加 =。
+
+    pat 可以传「=进水温度」也可以传已剥掉等号的「进水温度」：正常链路是
+    parse_point 先剥再调这里，但剥与不剥都得对 —— 少剥一次就静默不命中，
+    这种错没有报错、只有"规则不触发"。
+    """
+    if not pat or str(pat).strip() in ('', '*'):
         return True
-    # 2) 双向包含
-    core = pat.replace('*', '').strip()
-    if not core:
-        return True                     # pat 形如「**」，上面已处理，这里兜底
-    if len(core) < 2:
-        return False                    # 单字不做宽松匹配，避免错配
-    return core in s or s in core
+    pat, s = str(pat).strip(), str(s or '').strip()
+    if exact:
+        if pat.startswith('='):
+            pat = pat[1:].strip()
+            if not pat or pat == '*':
+                return True         # 只写了个「=」：用户想说的是"不筛"
+        return s == pat             # 完全一致：只认全名，不做任何宽松
+    if '*' in pat:
+        segs = [x for x in pat.split('*') if x.strip()]
+        if not segs:
+            return True
+        return any(seg in s for seg in segs)
+    return pat in s                 # 部分包含：单向
+
+
+
+def parse_point(raw):
+    """变量名输入框里的那一串 → (真名字, 是否完全一致)。
+
+    纯函数，单独可验算（边界见 verify/test_varmatch.py [C]）：
+      ''  / '*'      → ('*', False)          全部变量
+      '=进水温度'     → ('进水温度', True)     完全一致
+      '=' / '=*'     → ('*', False)          只写了个等号 / 等于星号，都当"不筛"
+      '进水温度'      → ('进水温度', False)    部分包含
+      '供*T1'        → ('供*T1', False)      片段
+    """
+    v = str(raw if raw is not None else '').strip()
+    if not v or v == '*':
+        return '*', False
+    if v.startswith('='):
+        nm = v[1:].strip()
+        # 「=」后面没名字，或者就写了个「=*」：用户想说的是"不筛"，
+        # 不能存成「完全一致 + 名字为空」—— 那种规则谁都命中不了，还不报错。
+        return (nm, True) if (nm and nm != '*') else ('*', False)
+    return v, False
 
 
 def _to_float(v):
@@ -327,13 +374,17 @@ class WatchEngine:
         for i, r in enumerate(base.get('rules') or []):
             if not isinstance(r, dict):
                 continue
+            # 拆分规则见 parse_point（纯函数，单独验算过）：
+            # 「=进水温度」→ (进水温度, True)；「」/「*」/「=」/「=*」→ (*, False)
+            pt, pt_exact = parse_point(r.get('point'))
             clean.append({
                 'id': str(r.get('id') or 'r{}'.format(i + 1)),
                 'enabled': bool(r.get('enabled', True)),
                 'name': str(r.get('name') or '未命名规则')[:40],
                 'account': str(r.get('account') or '*'),
                 'device': str(r.get('device') or '*'),
-                'point': str(r.get('point') or '*'),
+                'point': pt,
+                'var_exact': bool(pt_exact),
                 'op': str(r.get('op') or '<') if str(r.get('op') or '<') in OPS_ALL else '<',
                 'value': r.get('value'),
                 'value2': r.get('value2'),
@@ -635,7 +686,9 @@ class WatchEngine:
                 d['dev_points'] = [r[1] for r in rows if r[1]][:8]
             for r in rows:
                 pname = r[1]
-                if not _wmatch(rule.get('point'), pname):
+                # 变量名单独一套口径（= 完全一致 / 默认部分包含 / * 片段），
+                # 不能跟账号、设备名共用 _wmatch —— 三个框语义不一样。
+                if not match_var_name(rule.get('point'), pname, rule.get('var_exact')):
                     continue
                 d['point_hit'] += 1
                 v = _to_float(r[4].split(' ')[0] if r[4] else '')

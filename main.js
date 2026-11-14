@@ -33,7 +33,7 @@ const ICON_PATH = (() => {
   return undefined;   // 文件缺失时不传 icon，Electron 用默认
 })();
 try { fs.writeFileSync(LOGF, ''); } catch (e) { /* ignore */ }
-// 日志时间用本机时间。原来用 toISOString()，那是 UTC，比北京时间早 8 小时，
+// 日志时间用本机时间。原来用 toISOString()，那是 UTC，比本机时间早 8 小时，
 // 排查时会把「下午 6 点重开」看成「上午 10 点」，白绕半天。
 function nowStr(d) {
   const t = d ? new Date(d) : new Date();
@@ -753,8 +753,9 @@ function askCloseThen(win) {
 // 为什么需要：应用菜单被设成 null（去掉 File/Edit 菜单栏），Electron 也就不再给
 // <input> 提供系统右键菜单 → 所有输入框都点不出「剪切/复制/粘贴/全选」。
 // 这里自己做一份：① 输入框 → 标准编辑项（按 editFlags 决定可用性）；
-// ② 站点名/设备行 → 只保留两项：复制站点名称、刷新这台设备的实时数据
+// ② 站点名/设备行 → 只保留三项：复制站点名称、置顶该站、刷新
 //    （用户 2026-10-15 明确要求：其他的都去掉，菜单要短）。
+//    第三项刷什么看页面：巡站截图页 = 刷新这张截图，其余页 = 刷新实时数据。
 const MENU_JS_HITTEST = 'window.__hittest ? window.__hittest(%d, %d) : null';
 
 function menuRun(win, kind, val, view) {
@@ -798,7 +799,15 @@ function setupContextMenu(win) {
           click: () => menuRun(win, 'pin', info.no || nm, info.view)
         });
         items.push({ type: 'separator' });
-        items.push({ label: '刷新这台设备的实时数据', click: () => menuRun(win, 'refresh', info.no || nm, info.view) });
+        // 同一个位置只有一个"刷新"，但刷什么得看当前在哪一页：
+        //   巡站截图页 → 刷这张截图（那里才有批次和 png）；其余页 → 刷这台设备的实时数据。
+        // 以前两页都只给"刷新实时数据"，在截图页右键还得先跳到监控页，等于绕一圈。
+        // （用户 2026-11-14：右键菜单没有页面判断）
+        if (info.view === 'patrol') {
+          items.push({ label: '⟳ 刷新这张截图', click: () => menuRun(win, 'reshot', info.no || nm, info.view) });
+        } else {
+          items.push({ label: '刷新这台设备的实时数据', click: () => menuRun(win, 'refresh', info.no || nm, info.view) });
+        }
       }
       if (params.isEditable) {
         if (items.length) items.push({ type: 'separator' });

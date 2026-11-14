@@ -123,6 +123,25 @@ STATUS_TAG = {
     'blank':   '⚠采集异常',
     'unknown': '？未取到',      # 平台拒绝/请求失败：不是设备状态，别当成离线
 }
+
+# 文件名后缀：异常的站直接把状态写进 png 名字，资源管理器里搜「[离线]」就能挑出来。
+# 在线不加任何标记（绝大多数是正常的，加标记只会把名字撑长）。
+# 文案与界面状态列保持一致，用户不用记两套说法。
+FILE_TAG = {
+    'online':  '',
+    'stale':   '[数据陈旧]',     # 平台还留着旧值，但早就没在上报
+    'offline': '[离线无数据]',   # 当前值是「-」，平台明确说没数据
+    'blank':   '[采集异常]',     # 变量表是空的
+    'unknown': '[未取到]',       # 这一轮没问到（平台拒绝 / 请求失败）
+}
+# 只认末尾这一组方括号：站名里万一自带方括号（如「3号[东]泵房」）不会被误剥
+FILE_TAG_RE = re.compile(r'\[[^\]]*\]$')
+
+
+def strip_file_tag(stem):
+    """去掉文件名末尾的状态标记：'20261114_101010_某某站[离线]' -> '20261114_101010_某某站'"""
+    return FILE_TAG_RE.sub('', stem or '')
+
 # ===========================================
 
 LOGIN_URL = 'https://apimp.usr.cn/usrCloud/user/login'
@@ -1505,8 +1524,21 @@ def shoot(render_pg, dev, data, out_dir, keep=None):
     status = judge_status(rows, known=data.get('loaded', True))
     age = data_age_minutes(rows)
     sname = safe_name(dev['name'])
-    filename = (keep or {}).get(sname) or '{}_{}.png'.format(
-        datetime.now().strftime('%Y%m%d_%H%M%S'), sname)
+    suffix = FILE_TAG.get(status, '')
+    old = (keep or {}).get(sname)
+    if old:
+        # 补跑沿用旧名字（时间戳不动，不许变成第二张图），但末尾的状态标记要换成这次的：
+        # 上次标着「[离线]」，这次补到了就是在线，名字得跟着改，否则图和名字互相打架。
+        stem = strip_file_tag(old[:-4])
+        filename = stem + suffix + '.png'
+        if filename != old:
+            try:                     # 换了名字：旧的那张必须删，否则批次里会多一张图
+                os.remove(os.path.join(out_dir, old))
+            except OSError:
+                pass
+    else:
+        filename = '{}_{}{}.png'.format(
+            datetime.now().strftime('%Y%m%d_%H%M%S'), sname, suffix)
     path = os.path.join(out_dir, filename)
     render_mobile_cards(render_pg, dev, data, path, status)
     vn = '{} 个变量'.format(len(rows))
@@ -1653,7 +1685,8 @@ def keep_map(out_dir):
     """补跑时「同名覆盖」要用的对照表：{设备清洗名: 已存在的文件名}
 
     文件名形如 20261001_153909_18号站点YS2410033-26.png，第三段就是清洗后的
-    设备名。补跑必须复用这个名字，否则批次目录会多出第二张图，
+    设备名（异常站还会带 [离线] / [数据陈旧] 之类后缀，比对前先剥掉）。
+    补跑必须复用这个名字，否则批次目录会多出第二张图，
     「报告条数 = png 张数 = 压缩包里张数」这条对不上。
     """
     keep = {}
@@ -1662,7 +1695,7 @@ def keep_map(out_dir):
             if f.lower().endswith('.png'):
                 p3 = f[:-4].split('_', 2)
                 if len(p3) == 3:
-                    keep[p3[2]] = f
+                    keep[strip_file_tag(p3[2])] = f
     except Exception:
         return {}
     return keep
