@@ -87,13 +87,13 @@ except Exception:
 # 表格格式（可用 Excel / 记事本 / WPS 直接编辑，UTF-8 编码）：
 #
 #   名称,账号,密码,平台ID,启用
-#   示例账号,请填手机号,请填密码,W3rfV,是
-#   备用账号,请填手机号,请填密码,W3rfV,否
+#   示例账号,请填手机号,请填密码,,是
+#   备用账号,请填手机号,请填密码,,否
 #
 #   名称   —— 随便起，方便识别（会用于截图目录命名）
 #   账号   —— 登录手机号
 #   密码   —— 明文即可，程序内部自动转 md5
-#   平台ID —— 一般填 W3rfV，不要乱改
+#   平台ID —— 平台给出的那一串，不确定就留空
 #   启用   —— 填"是"或"Y"参与运行，填"否"跳过
 #
 # 多账号用法：
@@ -136,6 +136,32 @@ FILE_TAG = {
 }
 # 只认末尾这一组方括号：站名里万一自带方括号（如「3号[东]泵房」）不会被误剥
 FILE_TAG_RE = re.compile(r'\[[^\]]*\]$')
+
+# 异常站再给个"一眼看见"的前缀，放在文件名**最前面**：资源管理器按名称排序时
+# 它们会聚到最上面，一批 44 张图扫一眼就知道哪几张要处理。
+# ⚠ 不能用半角 * —— Windows 的文件名不允许 *（Python open() 直接 Errno 22），
+#   本软件主要在 Windows 上跑，打的 zip 还要发给别人在 Windows 上解压。
+#   用全角星 ★：同样是"星号"的意思，Windows / macOS 都合法，搜索框里也能直接搜。
+FILE_STAR = '★'
+
+
+def star_of(status):
+    """异常状态返回 ★，在线返回空串。
+    判据直接看 FILE_TAG：有状态标记 = 异常，两个常量永远同一份口径，不会各说各话。"""
+    return FILE_STAR if FILE_TAG.get(status) else ''
+
+
+def strip_star(stem):
+    """去掉文件名最前面的 ★：'★20260101_101010_某站[离线]' -> '20260101_101010_某站[离线]'"""
+    s = stem or ''
+    return s[len(FILE_STAR):] if s.startswith(FILE_STAR) else s
+
+
+def shot_key(stem):
+    """按文件名判断"谁更新"时用的键：先剥掉 ★ 再比。
+    不剥的话「★2026…」在字符串比较里比「2026…」小，"同名取最新"会变成
+    "带标记的那张永远最新"，界面上就会一直显示旧的异常图。"""
+    return strip_star(stem)
 
 
 def strip_file_tag(stem):
@@ -558,7 +584,7 @@ def ensure_accounts_file():
         '名称,账号,密码,平台ID,启用,站点过滤\n'
         '# 下面是示例，请改成真实账号；填"否"的行会被跳过\n'
         '# 站点过滤：对截图/数据监控/历史记录全部生效，不需要的设备不跑；留空=该账号全部设备\n'
-        '示例账号,请填手机号,请填密码,W3rfV,是,\n'
+        '示例账号,请填手机号,请填密码,,是,\n'
     )
     open(p, 'w', encoding='utf-8-sig').write(example)
     print('已生成账号表格模板: {}'.format(p))
@@ -1525,20 +1551,21 @@ def shoot(render_pg, dev, data, out_dir, keep=None):
     age = data_age_minutes(rows)
     sname = safe_name(dev['name'])
     suffix = FILE_TAG.get(status, '')
+    star = star_of(status)          # 异常站名字最前面顶一个 ★（在线为空）
     old = (keep or {}).get(sname)
     if old:
-        # 补跑沿用旧名字（时间戳不动，不许变成第二张图），但末尾的状态标记要换成这次的：
+        # 补跑沿用旧名字（时间戳不动，不许变成第二张图），但前后两处状态标记要换成这次的：
         # 上次标着「[离线]」，这次补到了就是在线，名字得跟着改，否则图和名字互相打架。
-        stem = strip_file_tag(old[:-4])
-        filename = stem + suffix + '.png'
+        stem = strip_star(strip_file_tag(old[:-4]))
+        filename = star + stem + suffix + '.png'
         if filename != old:
             try:                     # 换了名字：旧的那张必须删，否则批次里会多一张图
                 os.remove(os.path.join(out_dir, old))
             except OSError:
                 pass
     else:
-        filename = '{}_{}{}.png'.format(
-            datetime.now().strftime('%Y%m%d_%H%M%S'), sname, suffix)
+        filename = '{}{}_{}{}.png'.format(
+            star, datetime.now().strftime('%Y%m%d_%H%M%S'), sname, suffix)
     path = os.path.join(out_dir, filename)
     render_mobile_cards(render_pg, dev, data, path, status)
     vn = '{} 个变量'.format(len(rows))

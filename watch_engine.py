@@ -76,70 +76,11 @@ ST_TEXT = {'online': '在线', 'stale': '数据陈旧',
            'offline': '离线', 'blank': '采集异常'}
 
 
-def _wmatch(pat, s):
-    """账号 / 设备名的匹配。**口径与变量名不同**，别混用（变量名见 match_var_name）。
+def parse_name(raw):
+    """三框（账号 / 设备名 / 变量名）输入框里那一串 → (真名字, 是否完全一致)。
 
-    2026-11-14 定稿（手机版 v0.39 同口径）：这两个框只认两件事 ——
-
-      · 填 * 或留空   → 全部
-      · 不带 *        → 全名一字不差才算
-      · 带 *          → 按 * 切成几段，命中任一段就算（OR，不是"每段都要有"）
-                        「线路甲*」= 名字里含线路甲的那一批；「*有人云」= 名字里带有人云的
-
-    为什么不再做「双向包含」：一个框里塞两种语义（半截名也认、又认全名），
-    用户没法表达"我就要这一个"，提示也写不准。现在语义单一、说明写得出来。
-    账号匹配的是账号**名称**（如「线路丙」），不是手机号。
-    """
-    if not pat or str(pat).strip() in ('', '*'):
-        return True
-    pat, s = str(pat).strip(), str(s or '').strip()
-    if '*' in pat:
-        segs = [x for x in pat.split('*') if x.strip()]
-        if not segs:
-            return True                 # 形如「**」，等于全部
-        return any(seg in s for seg in segs)
-    return s == pat
-
-
-def match_var_name(pat, s, exact=False):
-    """变量名匹配。纯函数、零依赖，边界表见 verify/test_varmatch.py（9 组逐条验算）。
-
-      · * 或留空                → 全部变量
-      · exact=True（框里写 =x） → 全名一字不差才算
-      · 含 *                    → 片段 OR：「供*T1」命中含「供」或含「T1」的
-      · 其余                    → 部分包含：名字里含这几个字就算
-
-    默认必须是「部分包含」：平台上的变量名常带编码（「进水温度T2」「1#进水温度」），
-    写死全名会让规则永远不触发，而且**不报错**，是最难查的一类故障。
-    用户想收窄时自己在前面加 =。
-
-    pat 可以传「=进水温度」也可以传已剥掉等号的「进水温度」：正常链路是
-    parse_point 先剥再调这里，但剥与不剥都得对 —— 少剥一次就静默不命中，
-    这种错没有报错、只有"规则不触发"。
-    """
-    if not pat or str(pat).strip() in ('', '*'):
-        return True
-    pat, s = str(pat).strip(), str(s or '').strip()
-    if exact:
-        if pat.startswith('='):
-            pat = pat[1:].strip()
-            if not pat or pat == '*':
-                return True         # 只写了个「=」：用户想说的是"不筛"
-        return s == pat             # 完全一致：只认全名，不做任何宽松
-    if '*' in pat:
-        segs = [x for x in pat.split('*') if x.strip()]
-        if not segs:
-            return True
-        return any(seg in s for seg in segs)
-    return pat in s                 # 部分包含：单向
-
-
-
-def parse_point(raw):
-    """变量名输入框里的那一串 → (真名字, 是否完全一致)。
-
-    纯函数，单独可验算（边界见 verify/test_varmatch.py [C]）：
-      ''  / '*'      → ('*', False)          全部变量
+    纯函数、零依赖，单独可验算（边界见 verify/test_varmatch.py [A][C]）：
+      ''  / '*'      → ('*', False)          全部
       '=进水温度'     → ('进水温度', True)     完全一致
       '=' / '=*'     → ('*', False)          只写了个等号 / 等于星号，都当"不筛"
       '进水温度'      → ('进水温度', False)    部分包含
@@ -154,6 +95,44 @@ def parse_point(raw):
         # 不能存成「完全一致 + 名字为空」—— 那种规则谁都命中不了，还不报错。
         return (nm, True) if (nm and nm != '*') else ('*', False)
     return v, False
+
+
+def match_name(pat, s, exact=False):
+    """账号 / 设备名 / 变量名 共用的命中核心 —— 三个框一套口径（2026-11-16 统一）。
+
+      · 留空 或 *                → 全部
+      · exact=True（框里写 =x）  → 全名一字不差才算
+      · 含 *                    → 按 * 切成几段，命中任一段就算（OR，不是"每段都要有"）
+                                  「线路甲*」= 名字里含线路甲的那一批；「*有人云」= 名字里带有人云的
+      · 其余                    → 部分包含：名字里含这几个字就算
+
+    为什么三框合成一套：以前账号 / 设备名是「不带 * 必须全名相等」，用户照说明写
+    「线路甲」想筛一条线路，结果一条都不触发、还不报错；可同一句"写几个字就等于包含"
+    又管着变量名 —— 两张皮，谁也记不住。手机版已统一，桌面版跟着统一。
+
+    对老规则的影响只有一个方向：写全名的仍照旧命中，写半截名的从"不命中"变成
+    "命中"，不会让原本会响的规则突然不响。
+
+    账号匹配的是账号**名称**（如「线路丙」），不是手机号。
+    """
+    if not pat or str(pat).strip() in ('', '*'):
+        return True
+    pat, s = str(pat).strip(), str(s or '').strip()
+    if exact:
+        return s == pat             # 完全一致：只认全名，不做任何宽松
+    if '*' in pat:
+        segs = [x for x in pat.split('*') if x.strip()]
+        if not segs:
+            return True             # 形如「**」，等于全部
+        return any(seg in s for seg in segs)
+    return pat in s                 # 部分包含：单向
+
+
+def _norm_target(raw):
+    """账号 / 设备名落盘前的归一化：只把「=」「=*」这种等于没填的写成 '*'，
+    其余原样保留（含 = 前缀）—— 命中时由 parse_name 现拆，不另存 exact 字段。"""
+    p, ex = parse_name(raw)
+    return ('=' + p) if ex else p
 
 
 def _to_float(v):
@@ -374,15 +353,15 @@ class WatchEngine:
         for i, r in enumerate(base.get('rules') or []):
             if not isinstance(r, dict):
                 continue
-            # 拆分规则见 parse_point（纯函数，单独验算过）：
+            # 拆分规则见 parse_name（纯函数，单独验算过）：
             # 「=进水温度」→ (进水温度, True)；「」/「*」/「=」/「=*」→ (*, False)
-            pt, pt_exact = parse_point(r.get('point'))
+            pt, pt_exact = parse_name(r.get('point'))
             clean.append({
                 'id': str(r.get('id') or 'r{}'.format(i + 1)),
                 'enabled': bool(r.get('enabled', True)),
                 'name': str(r.get('name') or '未命名规则')[:40],
-                'account': str(r.get('account') or '*'),
-                'device': str(r.get('device') or '*'),
+                'account': _norm_target(r.get('account')),
+                'device': _norm_target(r.get('device')),
                 'point': pt,
                 'var_exact': bool(pt_exact),
                 'op': str(r.get('op') or '<') if str(r.get('op') or '<') in OPS_ALL else '<',
@@ -661,9 +640,13 @@ class WatchEngine:
                     'reason': '', 'at': now,
                     'dev_points': None,   # 该设备实际有哪些变量名（命中 0 时提示用）
                 }
-            if not _wmatch(rule.get('account'), cfg['name']):
+            # 三个框同一套口径（parse_name 拆 = 前缀 + match_name 命中）：
+            #   账号按账号名称比（不是手机号）；写「线路甲」就是含线路甲的那批。
+            acc_pat, acc_exact = parse_name(rule.get('account'))
+            if not match_name(acc_pat, cfg['name'], acc_exact):
                 continue
-            if not _wmatch(rule.get('device'), dev['name']):
+            dev_pat, dev_exact = parse_name(rule.get('device'))
+            if not match_name(dev_pat, dev['name'], dev_exact):
                 continue
             d['scanned'] += 1
             op = rule.get('op')
@@ -686,9 +669,9 @@ class WatchEngine:
                 d['dev_points'] = [r[1] for r in rows if r[1]][:8]
             for r in rows:
                 pname = r[1]
-                # 变量名单独一套口径（= 完全一致 / 默认部分包含 / * 片段），
-                # 不能跟账号、设备名共用 _wmatch —— 三个框语义不一样。
-                if not match_var_name(rule.get('point'), pname, rule.get('var_exact')):
+                # 变量名走同一个 match_name（= 完全一致 / 默认部分包含 / * 片段），
+                # 与账号、设备名完全同一套 —— 三个框不再各自一套口径。
+                if not match_name(rule.get('point'), pname, rule.get('var_exact')):
                     continue
                 d['point_hit'] += 1
                 v = _to_float(r[4].split(' ')[0] if r[4] else '')

@@ -1376,16 +1376,18 @@ class Handler(BaseHTTPRequestHandler):
             stem = f[:-4]
             parts = stem.split('_', 2)
             if len(parts) == 3:
-                # 异常站点的 png 名字末尾带 [离线] / [数据陈旧] 之类标记，
+                # 异常站点的 png 名字：最前面顶一个 ★、末尾带 [离线] / [数据陈旧] 之类标记。
                 # 比对前先剥掉：不然「某某站[离线]」和报告里的「某某站」对不上，
                 # 界面上就变成「这一批里没有截图」了。index 里仍存带标记的整名（要给 <img> 用）。
                 dev_key = R.strip_file_tag(parts[2])
-                # 同名取时间戳最新（前缀时间戳同长，字符串比较即时间序）
-                if dev_key not in index or stem > index[dev_key]:
+                # 同名取时间戳最新（前缀时间戳同长，字符串比较即时间序）。
+                # 比较前必须剥掉 ★：'★' < '2'，不剥的话带标记的那张会被当成"更新的"。
+                key = R.shot_key(stem)
+                if dev_key not in index or key > R.shot_key(index[dev_key]):
                     index[dev_key] = stem
                 for c in codes(dev_key):
                     old = index.get(c)
-                    if not old or stem > old:
+                    if not old or key > R.shot_key(old):
                         index[c] = stem
         for d in devs:
             # 文件名里的设备名经过 safe_name 清洗（去 ？（）():: 和空白），查询侧做同样清洗
