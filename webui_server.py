@@ -116,6 +116,7 @@ ST = {
     'acc_done': 0,          # 已完成账号的设备累计数
     'total': 0,             # 本次总设备数（解析"共 N 台设备"）
     'stage': '',
+    't0': 0.0,              # 本次运行开始时刻（epoch），前端显示「已用多久」
     'batch': None,
     'zip': None,
     'error': None,
@@ -600,7 +601,7 @@ def _row_enabled(r):
 
 def _runner(sel, device_nos, only_empty=False, batch=None):
     ST.update(running=True, error=None, wprog={}, acc_done=0,
-              total=0, stage='', done=None, finished=None)
+              total=0, stage='', done=None, finished=None, t0=time.time())
     # ★ 补跑时**不能**清空 results：页面上的列表要一直是全部站点，
     #   清掉就只剩补跑的那几台了（正是这次要修的毛病）。
     if not only_empty:
@@ -1641,6 +1642,10 @@ class Handler(BaseHTTPRequestHandler):
                     'n': len(logs),
                     'stage': ST['stage'],
                     'progress': {'done': done, 'total': ST['total']},
+                    # 已用秒数：跑着时按当前钟算；跑完就定在「这轮跑了多久」上，
+                    # 完成条上的「用时 X」直接用它（长期空闲也不会一直涨）
+                    'elapsed': ((time.time() if ST['running'] else (ST['finished'] or time.time()))
+                                - ST['t0']) if ST.get('t0') else 0,
                     'workers': ST['workers'],
                     'results': res,
                     'error': ST['error'],

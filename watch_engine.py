@@ -34,6 +34,47 @@ import run_usrcloud as R
 import usr_control          # 控制下发（MQTT over WebSocket，见 usr_control.py）
 
 VERSION = 1
+
+# ---- 整轮进度百分比（2026-11-17）--------------------------------------
+# 旧的进度条只按第一阶段「读取设备与变量定义」的 done/total 画：那一阶段一结束
+# 就是 95/95 → 100%，可后面「取最新值」「判定状态与告警」还要跑几十秒 ——
+# 用户看到进度条满了、界面却还写着「正在执行」，这正是本次要修的假完成。
+# 现在整轮分三段加权，段内推进全部来自真实计数：
+#   读取设备与变量定义   0 → 40   （已完成台数 / 总台数）
+#   取最新值            40 → 85   （已完成账号 / 总账号，最新值是按账号合批取的）
+#   判定状态与告警      85 → 99   （已判定台数 / 总台数）
+#   整轮真正跑完          100     （由前端完成态画，不在执行中给满）
+# 40/45/14 是展示分段比例，不是耗时预测；任一段的百分比都能从入参算出来。
+PCT_READ_END = 40
+PCT_FETCH_END = 85
+PCT_JUDGE_END = 99
+
+
+def progress_pct(stage, done=0, total=0, acc_done=0, acc_total=0,
+                 judge_done=0, judge_total=0, finished=False):
+    """整轮巡检百分比（0~100）。纯函数、零依赖；边界见 verify/test_progress.py。
+
+    finished=True（整轮跑完）才返回 100，执行过程中最多 99。
+    """
+    if finished:
+        return 100
+
+    def frac(d, t):
+        try:
+            d, t = float(d), float(t)
+        except (TypeError, ValueError):
+            return 0.0
+        return min(1.0, max(0.0, d / t)) if t > 0 else 0.0
+
+    if stage == '读取设备与变量定义':
+        return int(round(PCT_READ_END * frac(done, total)))
+    if stage == '取最新值':
+        return PCT_READ_END + int(round((PCT_FETCH_END - PCT_READ_END)
+                                        * frac(acc_done, acc_total)))
+    if stage == '判定状态与告警':
+        return PCT_FETCH_END + int(round((PCT_JUDGE_END - PCT_FETCH_END)
+                                         * frac(judge_done, judge_total)))
+    return 0
 RULES_FILE = '监控规则.json'
 HIST_DIR = '历史数据'           # 历史数据本地留档目录（每月一个 CSV）
 REC_PREFIX = '监控记录_'        # 巡检自动落盘的文件名前缀（区别于手动保存的）
@@ -270,9 +311,13 @@ class WatchEngine:
             'baseline_done': False,
             'last_run': None,
             'last_duration': None,
+            'started_at': 0.0,        # 本轮开始时刻（epoch）；不在跑时为 0，前端算「已用多久」
             'last_error': None,
             'next_run': None,
             'progress': [0, 0],
+            'pct': 0,                 # 整轮百分比 0~100，见 progress_pct（执行中最多 99）
+            'pnum': [0, 0],           # 当前阶段的真实计数 [已完成, 总数]，随阶段换单位
+            'punit': '台',            # 当前阶段计数的单位：台 / 账号
             'stage': '',
             'paused_reason': None,
             'requests_last_round': 0,
@@ -735,6 +780,8 @@ class WatchEngine:
         t0 = time.time()
         self._counters = {'requests': 0, 'reset_at': t0}
         self.state['running'] = True
+        self.state['started_at'] = t0        # 前端靠它显示「已用 1 分 12 秒」
+        self.state['stage'] = '读取设备与变量定义'
         self.state['last_error'] = None
         self.state['paused_reason'] = None
         self._new_anoms = []
@@ -819,6 +866,10 @@ class WatchEngine:
             for f in as_completed(futs):
                 done += 1
                 self.state['progress'] = [done, total]
+                # 第一阶段跑满也只到 40% —— 后面还有取最新值、判定两段
+                self.state['pct'] = progress_pct('读取设备与变量定义', done, total)
+                self.state['pnum'] = [done, total]
+                self.state['punit'] = '台'
                 cfg, d = futs[f]
                 key = '{}|{}'.format(cfg['name'], d['no'])
                 meta[key] = (cfg, d)
@@ -838,14 +889,25 @@ class WatchEngine:
                     if errors <= 3:
                         self._say('取数异常 {}: {}'.format(d['name'][:20], repr(e)[:80]))
 
+        self.state['stage'] = '取最新值'
         # ---- 最新值按账号合批：每账号 1 发起（超过 2000 点再分片）----
         # 以前每台设备单独发一次 last，94 台就是 94 发；合批后一个账号 1 发。
         # 实测 47 台 1054 点一次返回 1048 条、0.9 秒。
         by_acc = {}
         for item in defs:
             by_acc.setdefault(item[0]['name'], []).append(item)
+        self.state['pct'] = progress_pct('取最新值', 0, 0, 0, len(by_acc))
+        self.state['pnum'] = [0, len(by_acc)]
+        self.state['punit'] = '账号'
         last_maps = {}
+        acc_total = len(by_acc)
+        acc_done = 0
         for acc, items in by_acc.items():
+            # 每个账号（不管成功失败）都算已完成一格，进度 40% → 85%
+            acc_done += 1
+            self.state['pct'] = progress_pct('取最新值', 0, 0, acc_done, acc_total)
+            self.state['pnum'] = [acc_done, acc_total]
+            self.state['punit'] = '账号'
             pairs = []
             for cfg, tok, dev, info, plst in items:
                 for p in plst:
@@ -882,6 +944,7 @@ class WatchEngine:
                 continue
             results.append((cfg, tok, dev, self._rows_from(dev['no'], plst, lmap), info))
 
+        self.state['stage'] = '判定状态与告警'
         # 汇总本轮结果
         res_by_key = {}
         fresh = {}
@@ -890,7 +953,16 @@ class WatchEngine:
             want_min = int(self.rules.get('stale_minutes') or 30)
         except (TypeError, ValueError):
             want_min = 30
+        judge_total = len(results)
+        judge_done = 0
+        self.state['pnum'] = [0, judge_total]
+        self.state['punit'] = '台'
         for cfg, tok, dev, rows, info in results:
+            judge_done += 1
+            self.state['pct'] = progress_pct('判定状态与告警', 0, 0, 0, 0,
+                                             judge_done, judge_total)
+            self.state['pnum'] = [judge_done, judge_total]
+            self.state['punit'] = '台'
             key = '{}|{}'.format(cfg['name'], dev['no'])
             res_by_key[key] = rows
             st = R.judge_status(rows)
@@ -1050,6 +1122,8 @@ class WatchEngine:
         self.state['last_duration'] = time.time() - t0
         self.state['requests_last_round'] = self._counters['requests']
         self.state['progress'] = [total, total]
+        # 全部阶段都结束了才画满 100%（执行过程中 progress_pct 最多给 99）
+        self.state['pct'] = progress_pct('', 0, 0, 0, 0, 0, 0, finished=True)
 
         # 「没问到」与「真离线」必须分开计数：
         # 前者是平台没答（限流/无权限/登录失效），后者是问到了、数据确实不对。
@@ -1100,6 +1174,7 @@ class WatchEngine:
         })
         del self.state['history'][:-20]
         self.state['running'] = False
+        self.state['started_at'] = 0.0
         self.state['stage'] = ''
 
     def _pause_for_throttle(self, why):
@@ -1332,7 +1407,11 @@ class WatchEngine:
             'next_run': self.state['next_run'],
             'next_in': max(0, int(self.state['next_run'] - now)) if self.state['next_run'] else None,
             'progress': self.state['progress'],
+            'pct': self.state.get('pct') or 0,
+            'pnum': self.state.get('pnum') or [0, 0],
+            'punit': self.state.get('punit') or '台',
             'stage': self.state['stage'],
+            'started_at': self.state.get('started_at') or 0,
             'paused_reason': self.state['paused_reason'],
             'requests_last_round': self.state['requests_last_round'],
             # 本轮「没问到 / 真离线」分开的计数（前端顶部横条显示）
