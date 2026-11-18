@@ -43,6 +43,33 @@ UI_DIR = os.path.join(BASE, 'ui')
 LOG_FILE = os.path.join(BASE, 'webui_error.log')
 SETTINGS_FILE = os.path.join(BASE, '运行参数.json')   # 设置页持久化（并发线程/异常提醒方式）
 CLOSE_MODE_FILE = os.path.join(BASE, '关闭方式.json')  # 关闭按钮行为：ask=每次询问 / tray=收托盘 / exit=直接退出
+UPDATE_TRACE = os.path.join(BASE, '更新诊断.txt')   # 每次「检查更新」记一行，界面说没反应时先看这里
+
+
+def _log_update_check(auto, r, cost):
+    """把一次检查更新记一行：谁发起的、结论、耗时，最多留 400 行。
+
+    界面报「点了没反应」时，这一行能直接分清两种情况：请求根本没到后端，
+    还是到了、后端也确实回了「已是最新」——省得靠猜。
+    """
+    try:
+        r = r or {}
+        rec = '%s %s → ok=%s hasUpdate=%s version=%s 用时%.0fms%s\n' % (
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            '自动' if auto else '手动',
+            r.get('ok'), r.get('hasUpdate'), r.get('version') or '-',
+            cost * 1000.0,
+            (' 错误=' + str(r.get('error'))) if r.get('error')
+            else (' 走缓存' if r.get('skipped') else ' 现查'))
+        old = []
+        if os.path.isfile(UPDATE_TRACE):
+            with open(UPDATE_TRACE, 'r', encoding='utf-8', errors='replace') as f:
+                old = f.readlines()[-399:]
+        old.append(rec)
+        with open(UPDATE_TRACE, 'w', encoding='utf-8') as f:
+            f.writelines(old)
+    except Exception:
+        pass
                                                     # 与 Electron 壳 main.js 共用同一个文件，避免两处设置打架
 
 # 变量置顶规则（三处共用）：数据监控实时卡、巡站截图、历史数据都按它排。
@@ -88,6 +115,14 @@ except Exception:                                        # pragma: no cover
 
     varsort = _VarSortFallback()
     print('[警告] 缺少 varsort.py，变量置顶退回内置默认规则')
+
+# 内置更新（检查新版 / 下载 / 备份 / 覆盖 / 进度）。
+# 和 varsort 一样留兜底：打包漏拷时只是设置页那块显示「不可用」，不能拖垮整个后端。
+try:
+    import updater_lib
+except Exception:                                        # pragma: no cover
+    updater_lib = None
+    print('[警告] 缺少 updater_lib.py，内置更新不可用')
 
 if sys.stdout is None:                      # pythonw.exe 下没有控制台
     sys.stdout = open(os.devnull, 'w', encoding='utf-8', errors='ignore')
@@ -869,6 +904,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._open(qs.get('p', [''])[0])
             if name == 'hello':
                 return self._json({'ok': True})
+            if name == 'update/config':
+                if updater_lib is None:
+                    return self._err('缺少更新模块')
+                cfg = updater_lib.read_config()
+                return self._json({'ok': True,
+                                   'enabled': bool(cfg.get('enabled', True)),
+                                   'channel': cfg.get('channel', 'public'),
+                                   'sourceUrl': cfg.get('sourceUrl', ''),
+                                   'repo': cfg.get('repo', ''),
+                                   'current': updater_lib.current_version(),
+                                   'runVersion': updater_lib.BOOT_VERSION})
+            if name == 'update/check':
+                # auto=1 是每天一次的静默检查（同一天直接回缓存）；不带参数就是手动检查
+                if updater_lib is None:
+                    return self._err('缺少更新模块')
+                auto = qs.get('auto', ['0'])[0] == '1'
+                _t0 = time.time()
+                _res = None
+                try:
+                    _res = updater_lib.check(auto)
+                finally:
+                    _log_update_check(auto, _res, time.time() - _t0)
+                return self._json(_res)
+            if name == 'update/status':
+                if updater_lib is None:
+                    return self._err('缺少更新模块')
+                return self._json(updater_lib.status())
             if name == 'settings':
                 return self._json({'ok': True, 'workers': ST['workers'],
                                    'notify_mode': ST.get('notify_mode', 'both')})
@@ -948,6 +1010,25 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return self._json({'ok': True})
             if name == 'hello':
+                return self._json({'ok': True})
+            if name == 'update/install':
+                # 后台线程下载+替换，立即返回；前端轮询 /api/update/status 画进度
+                if updater_lib is None:
+                    return self._err('缺少更新模块')
+                return self._json(updater_lib.install())
+            if name == 'update/config':
+                if updater_lib is None:
+                    return self._err('缺少更新模块')
+                keep = {k: body[k] for k in ('enabled', 'channel', 'sourceUrl', 'repo', 'timeout')
+                        if k in body}
+                cfg = updater_lib.save_config(keep)
+                return self._json({'ok': True, 'enabled': bool(cfg.get('enabled', True)),
+                                   'channel': cfg.get('channel', 'public'),
+                                   'sourceUrl': cfg.get('sourceUrl', ''), 'repo': cfg.get('repo', '')})
+            if name == 'update/restartflag':
+                # 用户点了重启按钮：清掉 needRestart，避免重启后又提示一遍
+                if updater_lib is not None:
+                    updater_lib.clear_restart_flag()
                 return self._json({'ok': True})
             if name == 'settings':
                 # 只更新请求里带到的字段（异常提醒页只传 notify_mode，不能误清其它设置）
@@ -1401,6 +1482,9 @@ class Handler(BaseHTTPRequestHandler):
                     break
             if best:
                 d['shot'] = rel_dir + '/' + best + '.png'
+                # 拖出截图用：dragstart 是同步事件，等不到后端再查一次路径，
+                # 所以设备列表直接把绝对路径带过来（/shot 仍只收相对路径，不受影响）。
+                d['shot_abs'] = os.path.abspath(os.path.join(BASE, *d['shot'].split('/')))
                 t = best[:15]
                 if len(t) == 15 and t[8] == '_':
                     d['shot_time'] = '{}-{}-{} {}:{}:{}'.format(

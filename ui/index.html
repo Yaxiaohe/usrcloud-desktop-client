@@ -105,10 +105,20 @@
   .pvrtip .ok{color:#12A150}
   .pvrtip .bad{color:#D9383D}
   .pvrtip .wait{color:#2F6BFF}
+  /* 多选时预览区顶部的「已选 N 个」：只提示数量，不挡截图 */
+  .pvsel{flex:none;margin:8px 16px 0;padding:6px 10px;border-radius:8px;
+    background:#EAF1FE;border:1px solid #D3E0FB;color:#2F6BFF;
+    font-size:11.5px;line-height:1.6}
+  .pvsel b{font-weight:600}
   #pvBody .shot{cursor:zoom-in}
 
   .drow:hover{background:#F8FAFE}
   .drow.on{background:#EDF3FE}
+  /* 截图可拖出：多选高亮 + 拖拽光标。.sel 是「这一批要一起拖走的图」，跟 .on（右侧正在看哪台）分开存。 */
+  .drow.dragok{cursor:grab}
+  .drow.dragok:active{cursor:grabbing}
+  .drow.sel{background:#E4EDFF;box-shadow:inset 3px 0 #2F6BFF}
+  .drow.sel.on{background:#DCE8FE}
   .dname{position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:26px}
   /* 设备行上的「复制站点名称」：悬停才出现，预留了 26px 内边距，不会盖住名称、不改变对齐 */
   .cpname{position:absolute;right:2px;top:50%;transform:translateY(-50%);display:none;align-items:center;justify-content:center;width:22px;height:22px;border:1px solid #E4E8EE;border-radius:6px;background:#fff;color:#8A9099;cursor:pointer;padding:0}
@@ -261,6 +271,16 @@
   .runbar .rb-pct{flex:none;min-width:42px;text-align:right;font-weight:600;
     font-variant-numeric:tabular-nums;color:#2F6BFF}
   .runbar.done .rb-pct{color:#1A7F45}
+  /* 设置页「软件更新」：进度条 + 状态文字，沿用 runbar 的蓝色，嵌在行里 */
+  .updbar{display:none;align-items:center;gap:9px;height:28px;margin-top:8px;font-size:11.5px;color:#3A4048}
+  .updbar.on{display:flex}
+  .updbar .ub-track{position:relative;flex:1;max-width:360px;height:6px;border-radius:3px;background:#DCE7FB;overflow:hidden}
+  .updbar .ub-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;
+    background:linear-gradient(90deg,#4B84FF,#2F6BFF);transition:width .3s ease}
+  .updbar .ub-fill.indet{width:32%!important;animation:rbsweep 1.1s ease-in-out infinite}
+  .updbar .ub-pct{min-width:38px;text-align:right;font-weight:600;color:#2F6BFF;font-variant-numeric:tabular-nums}
+  .updbar.done .ub-fill{background:#1A7F45}
+  .updbar.done .ub-pct{color:#1A7F45}
   .logview{flex:1;min-height:0;display:flex;flex-direction:column;background:#FBFBFC}
   /* 异常提醒页 */
   .albody{flex:1;min-height:0;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
@@ -586,6 +606,7 @@
               </button>
             </span>
           </div>
+          <div class="pvsel" id="pvSel" style="display:none"></div>
           <div class="pvb" id="pvBody">
             <div class="phold">运行巡站后，这里显示站点截图。<br>单击左侧设备可预览其最新一张。</div>
           </div>
@@ -841,7 +862,26 @@
       </div>
       <div class="row"><label></label><button class="btn pri" onclick="saveSettings()">保存设置</button>
         <span class="hint" id="setMsg" style="margin-left:10px">改动后点保存，重启软件仍生效</span></div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.5.3（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:5px">软件更新</label>
+        <div style="flex:1;min-width:0">
+          <div class="arow" style="flex-wrap:wrap;gap:8px">
+            <span class="hint" id="updCur" style="margin:0">当前版本 —</span>
+            <button type="button" class="btn" id="updCheckBtn" onclick="updCheck()">检查更新</button>
+            <button type="button" class="btn pri" id="updInstallBtn" onclick="updInstall()" style="display:none">立即更新</button>
+            <button type="button" class="btn pri" id="updRestartBtn" onclick="updRestart()" style="display:none">重启程序</button>
+          </div>
+          <div class="updbar" id="updBar">
+            <span id="updBarTxt">正在检查…</span>
+            <div class="ub-track"><div class="ub-fill indet" id="updBarFill"></div></div>
+            <span class="ub-pct" id="updBarPct">…</span>
+          </div>
+          <p class="ahint" id="updMsg" style="margin:7px 0 0">
+            每天自动检查一次，也可以点「检查更新」手动查。更新只替换程序文件，账号、登录缓存和历史数据都不动；替换完要重启才生效。
+          </p>
+        </div>
+      </div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.5.14（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -952,6 +992,9 @@
   var ACCOUNTS = [], SEL = null, LOG_SINCE = 0, POLL = null, PV_PATH = null, DEMO = false;
   var AUTO_SHOT = false;              // 截图完成后自动展示第一张有图的设备
   var AUTO_PICK = {};                 // listId -> 已自动选中的账号（每个账号只在首次加载时自动选一条）
+  var SEL_ANCHOR = -1;                // 巡站截图 Shift 范围多选的锚点行下标（可见行序列里）；-1＝未设
+  var SEL_ANCHOR_ROW = null;          // 锚点行元素本身：筛选/重排后下标会指错站，用元素最稳
+  var SEL_N = 0;                      // 当前选中（可见且有截图）的条数
   var NAV_TARGET = null;              // 「点系统通知跳转到站点」的目标：跨账号切换时，优先级高于「自动选中第一台」
   // CUR_DEVS 里现在装的是「哪个账号」的列表。切账号后旧列表还留着（里面带 _acc，看着像目标账号的设备），
   // 不记这一笔，「点通知跳转」就会拿旧列表提前认定成功，随后真列表到达又被自动选中第一台覆盖。
@@ -964,8 +1007,23 @@
   function avColor(i) { return PAL[i % PAL.length]; }
   function ini(name) { return (name || '?').slice(0, 1); }
   function api(p, opts) {
-    return fetch(p, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}))
-      .then(function (r) { return r.json(); }).catch(function () { return { ok: false, msg: '离线' }; });
+    opts = opts || {};
+    var ms = opts.timeout || 0;             // 0 = 不设超时（老行为），只有明确要等的接口才传
+    var o = Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts);
+    delete o.timeout;
+    var ctl = null, timer = null;
+    if (ms > 0 && typeof AbortController !== 'undefined') {
+      ctl = new AbortController();
+      o.signal = ctl.signal;
+      timer = setTimeout(function () { try { ctl.abort(); } catch (e) {} }, ms);
+    }
+    return fetch(p, o).then(function (r) {
+      if (timer) clearTimeout(timer);
+      return r.json();
+    }).catch(function () {
+      if (timer) clearTimeout(timer);
+      return { ok: false, msg: '离线' };
+    });
   }
   var TOAST_T = null;
   function toast(msg) {
@@ -1532,6 +1590,15 @@
       var row = document.createElement('div');
       row.className = 'drow';
       row.dataset.no = d.no;          // 供「点击系统通知跳转到对应站点」按编号定位
+      row.dataset.acc = d._acc || ''; // 上下键按编号+账号反查设备，不能用可见行的下标去索引完整列表
+      if (listId === 'devList') {
+        row.dataset.path = d.shot_abs || '';   // 后端给的绝对路径，dragstart 同步要用
+        if (d.shot_abs) {
+          row.classList.add('dragok');
+          row.draggable = true;
+          row.title = '拖到文件夹或其它软件＝这张截图；Ctrl 逐个多选、Shift 首尾连选一起拖';
+        }
+      }
       var st = shownStatus(d);   // 按当前时钟复判，别让「在线 11 小时前」这种自相矛盾出现
       var flag = (live && d.anoms && d.anoms.length)
         ? '<i class="wflag" title="' + esc(d.anoms.map(function (x) { return x.name; }).join('、')) + '"></i>'
@@ -1558,7 +1625,40 @@
         ev.stopPropagation();
         copyText(d.name || d.no || '', '已复制站点名称');
       };
-      row.onclick = function () {
+      row.onclick = function (ev) {
+        // Ctrl / Cmd 点＝逐个加进或移出「要一起拖走的截图」；
+        // Shift 点＝从上次锚点到这一行整段选中（首尾快速多选），只对可见行生效；
+        // 普通点击＝只选这一台，跟原来的单选预览行为完全一致。
+        var isMulti = !!(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey));
+        if (isMulti && listId === 'devList') {
+          // 可见行序列（跟搜索筛选后的结果一致），被筛掉的行不参与范围选择
+          var vis = $$('#devList .drow').filter(function (r) { return r.style.display !== 'none'; });
+          var to = vis.indexOf(row);
+          if (to < 0) to = 0;
+          if (ev.shiftKey) {
+            // 第一次按 Shift 点（还没有锚点）：就以这一行为锚点，只选它；
+            // 再 Shift 点另一行才从锚点画到这一行 —— 否则「Shift 点第一个、再点最后一个」
+            // 每次都只能选中被点的那一行，永远连不成一段。
+            var from = vis.indexOf(SEL_ANCHOR_ROW);
+            if (from < 0) { SEL_ANCHOR_ROW = row; from = to; }
+            var lo = Math.min(from, to), hi = Math.max(from, to);
+            $$('#devList .drow').forEach(function (r) { r.classList.remove('sel'); });
+            for (var k = lo; k <= hi; k++) {
+              if (vis[k].dataset.path) vis[k].classList.add('sel');
+            }
+          } else {
+            row.classList.toggle('sel');
+            SEL_ANCHOR_ROW = row;   // 锚点跟随 Ctrl/Cmd 点过的行，下一次 Shift 从这里起算
+          }
+          SEL_ANCHOR = vis.indexOf(SEL_ANCHOR_ROW);
+        } else {
+          $$('#' + listId + ' .drow').forEach(function (r) { r.classList.remove('sel'); });
+          if (listId === 'devList' && row.dataset.path) row.classList.add('sel');
+          SEL_ANCHOR_ROW = row;     // 普通点击重置锚点
+          SEL_ANCHOR = $$('#devList .drow')
+            .filter(function (r) { return r.style.display !== 'none'; }).indexOf(row);
+        }
+        updateSelInfo();            // 每次选择变化都刷「已选 N 个」
         $$('.drow').forEach(function (r) { r.classList.remove('on'); });
         row.classList.add('on');
         if (listId === 'devListH') histPick(d);          // 历史页：画折线图
@@ -1568,9 +1668,29 @@
         }
         else { showPreview(d); }                       // 巡站页：直接换右边常驻预览
       };
+      if (listId === 'devList' && d.shot_abs) {
+        row.ondragstart = function (ev) {
+          var picked = [];
+          if (row.classList.contains('sel')) {
+            $$('#devList .drow.sel').forEach(function (r) {
+              if (r.dataset && r.dataset.path && r.style.display !== 'none') picked.push(r.dataset.path);
+            });
+          } else {
+            // 从没选中的行开始拖：先把旧选集清掉，拖走的就只有这一张
+            $$('#devList .drow.sel').forEach(function (r) { r.classList.remove('sel'); });
+            row.classList.add('sel');
+            picked = [row.dataset.path];
+          }
+          updateSelInfo();
+          if (ev) ev.preventDefault();                   // 交给 Electron 原生拖拽，别走浏览器默认那套
+          if (!picked.length) return;
+          if (window.desktopDrag && window.desktopDrag.start) window.desktopDrag.start(picked);
+        };
+      }
       box.appendChild(row);
     });
     applyDevQ(listId);                    // 新渲染的列表套用当前搜索关键字
+    if (listId === 'devList') { SEL_ANCHOR_ROW = null; SEL_ANCHOR = -1; updateSelInfo(); }
     // 右侧没内容就自动选中一条，保证默认有内容（监控=实时卡/历史=折线图/巡站=截图）；
     // 手动选过的状态（PV_LIVE/HCUR/PV_PATH）还在时不打断，状态被清（切账号/删批次）才重新选
     if (devs.length) {
@@ -1634,6 +1754,9 @@
     var off = devs.length - on - st - unk;
     if (foot) foot.textContent = '共 ' + devs.length + ' 台 · 在线 ' + on + ' / 陈旧 ' + st + ' / 离线 ' + off
       + (unk ? ' / 未巡 ' + unk : '');
+    // 自动选中 / 补回高亮的行也要进拖选集合，并且要成为 Shift 锚点 ——
+    // 否则「切回来直接 Shift 点最后一行」连不成段（用户 2026-11-18 报的）。
+    if (listId === 'devList') setActiveRow(box.querySelector('.drow.on'));
   }
   function updateBarSub(devs) {
     if (SEL === '__ALL__') {
@@ -1649,6 +1772,39 @@
     $('#barSub').textContent = a.account + ' · 平台 ' + a.platform + ' · '
       + (s ? ('已选 ' + s.length + ' / ' + devs.length + ' 台') : '全部设备');
   }
+  // 预览区那条「已选 N 个」：只统计可见、且真有截图的行（拖的时候也只带这些）
+  function updateSelInfo() {
+    var el = $('#pvSel');
+    var n = 0;
+    $$('#devList .drow.sel').forEach(function (r) {
+      if (r.dataset && r.dataset.path && r.style.display !== 'none') n++;
+    });
+    SEL_N = n;
+    if (!el) return;
+    if (n > 1) {
+      el.style.display = '';
+      el.innerHTML = '已选 <b>' + n + '</b> 个截图 · 拖到文件夹就会一起带出';
+    } else {
+      el.style.display = 'none';
+      el.innerHTML = '';
+    }
+  }
+  // 让「当前这一行」同时具备三件事：高亮、进选中集合、成为 Shift 锚点。
+  // 自动选中（切页面回来/换账号）和键盘 ↑↓ 走的都是这里 —— 以前它们只加样式，
+  // 锚点还停在上一次点击的行上，导致 Shift 点最后一行只选中一行。
+  function setActiveRow(row) {
+    if (!row || !row.dataset) return;
+    row.classList.add('on');
+    if (row.parentNode && row.parentNode.id === 'devList' && row.dataset.path) {
+      row.classList.add('sel');
+      SEL_ANCHOR_ROW = row;
+      SEL_ANCHOR = $$('#devList .drow').filter(function (r) {
+        return r.style.display !== 'none';
+      }).indexOf(row);
+      updateSelInfo();
+    }
+  }
+
   function showPreview(d) {
     PV_LIVE = null;
     // 换了一台站：上一台的"已重新获取/重拍失败"提示留着会张冠李戴；
@@ -2080,7 +2236,7 @@
   }
   function autoPreview(name) {
     var first = (DEMO_DEVS[name] || [])[0];
-    if (first) { var rows = $$('#devList .drow'); if (rows[0]) { rows[0].classList.add('on'); showPreview(first); } }
+    if (first) { var rows = $$('#devList .drow'); if (rows[0]) { setActiveRow(rows[0]); showPreview(first); } }
   }
   function openShot() { if (PV_PATH) api('/api/open?p=' + encodeURIComponent(PV_PATH)); }
 
@@ -2099,7 +2255,9 @@
     if (!t) return;
     var tag = (document.activeElement && document.activeElement.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    var rows = $$(t.list + ' .drow');
+    // 搜索框只把不匹配的行设成 display:none，行还留在 DOM 里 —— 键盘必须只看可见行，
+    // 否则 ↓ 会跳到被筛掉的设备上（2026-11-18 报的 bug）。
+    var rows = $$(t.list + ' .drow').filter(function (r) { return r.style.display !== 'none'; });
     if (!rows.length) return;
     e.preventDefault();
     var idx = -1;
@@ -2107,12 +2265,27 @@
     idx = e.key === 'ArrowDown' ? idx + 1 : (idx < 0 ? 0 : idx - 1);
     if (idx < 0) idx = 0;
     if (idx > rows.length - 1) idx = rows.length - 1;
-    var d = CUR_DEVS[idx];
+    var row = rows[idx];
+    // 可见行的下标 ≠ 完整设备列表的下标，必须按编号+账号反查，不能拿 CUR_DEVS[idx]。
+    var d = null;
+    if (row && row.dataset) {
+      var no = row.dataset.no, acc = row.dataset.acc || '';
+      for (var i = 0; i < CUR_DEVS.length; i++) {
+        var x = CUR_DEVS[i];
+        if (!x) continue;
+        if (String(x.no) === String(no) && (x._acc || '') === acc) { d = x; break; }
+      }
+      if (!d && no) {
+        for (var j = 0; j < CUR_DEVS.length; j++) {
+          if (CUR_DEVS[j] && String(CUR_DEVS[j].no) === String(no)) { d = CUR_DEVS[j]; break; }
+        }
+      }
+    }
     if (!d) return;
-    rows.forEach(function (r) { r.classList.remove('on'); });
-    rows[idx].classList.add('on');
+    $$(t.list + ' .drow').forEach(function (r) { r.classList.remove('on'); r.classList.remove('sel'); });
+    setActiveRow(row);          // ↑↓ 停在哪一行，Shift 就从哪一行起算
     t.act(d);
-    rows[idx].scrollIntoView({ block: 'nearest' });
+    row.scrollIntoView({ block: 'nearest' });
   });
   function openShotDir() {
     if (!PV_PATH) return;
@@ -2196,10 +2369,13 @@
   function markRow(no) {
     var rows = $$('#devList .drow'), hit = null;
     rows.forEach(function (r) {
-      if (r.getAttribute('data-no') === String(no)) { r.classList.add('on'); hit = r; }
-      else r.classList.remove('on');
+      if (r.getAttribute('data-no') === String(no)) hit = r;
+      else { r.classList.remove('on'); r.classList.remove('sel'); }
     });
-    if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: 'nearest' });
+    if (hit) {
+      setActiveRow(hit);
+      if (hit.scrollIntoView) hit.scrollIntoView({ block: 'nearest' });
+    }
   }
   function shotPoll() {
     api('/api/reshotstat').then(function (j) {
@@ -3190,6 +3366,7 @@
       var txt = nm ? nm.textContent.toLowerCase() : '';
       kids[i].style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
     }
+    updateSelInfo();   // 筛选变了，可见的选中数跟着变
   }
   function wTab(t) {
     W_TAB = t;
@@ -3810,6 +3987,9 @@
     if (v === 'alerts') renderAlerts();
     if (v === 'patrol') refreshDevices();
     if (v === 'history') refreshDevices();
+    if (v === 'settings') {
+      updRefresh();          // 每次进设置页刷新更新状态（每天一次的检查结果也在里面）
+    }
   }
   $$('.rail .ic').forEach(function (b) {
     b.onclick = function () {
@@ -4468,6 +4648,248 @@
   }
   function editAccounts() { if (!DEMO) api('/api/open?p=accounts.csv'); }
   function pickStations() { openSiteModal(); }   // 顶部「选择站点」按钮
+  // ---------- 软件更新 ----------
+  // 检查/下载/替换都在 Python 后端（/api/update/*），这里只管显示和轮询。
+  // 「重启程序」必须走主进程的 app.relaunch()：页面自己 reload 不会重新加载 main.js 和 .py。
+  var UPD = { checking: false, installing: false, hasUpdate: false,
+              latest: '', notes: '', needRestart: false, cur: '', curIsRun: false,
+              applied: '', checkedNote: '', checkedAt: '', lastErr: '' };
+  // 检查结果要带时间：只说「已是最新版」，用户没法判断这条是不是刚才那次点出来的。
+  function hhmmss() {
+    var d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  }
+  function updBar(on, text, pct, done) {
+    var el = $('#updBar'); if (!el) return;
+    el.classList.toggle('on', !!on);
+    el.classList.toggle('done', pct === 100);
+    if (text != null) $('#updBarTxt').textContent = text;
+    var fill = $('#updBarFill'), lab = $('#updBarPct');
+    if (pct == null || pct < 0) {           // 算不出百分比就走来回扫动的条
+      fill.classList.add('indet'); fill.style.width = ''; lab.textContent = '…';
+    } else {
+      fill.classList.remove('indet'); fill.style.width = pct + '%'; lab.textContent = pct + '%';
+    }
+    if (done != null && pct < 0) lab.textContent = done;
+  }
+  function updButtons() {
+    var ins = $('#updInstallBtn'), rst = $('#updRestartBtn'), chk = $('#updCheckBtn');
+    // 最后一道保险：装上的版本就是正在跑的版本，说明早就重启过了，
+    // 不管哪一路数据说「待重启」都不该再露出按钮（后端也算同一条规则）。
+    // 只在「当前版本来自 runVersion」时才敢用这条保险：旧后端不返回 runVersion，
+    // cur 会回落成磁盘版本，装完更新那一刻两者都是新号，保险会把必须显示的重启按钮压掉。
+    var needRst = UPD.needRestart &&
+      !(UPD.curIsRun && UPD.applied && UPD.cur && UPD.applied === UPD.cur);
+    if (ins) {
+      // 有待重启时也要能点「立即更新」：发布页上出了更新版本时，直接升到那个，
+      // 重启一次到位，不必「先重启到上次装的版本 → 再检查一次 → 再更新」。
+      ins.style.display = (UPD.hasUpdate && !UPD.installing) ? '' : 'none';
+      if (UPD.confirmPending) {
+        ins.textContent = '确认更新？再点一次';
+        ins.classList.remove('pri');
+      } else {
+        ins.textContent = '立即更新';
+        ins.classList.add('pri');
+      }
+    }
+    if (rst) rst.style.display = needRst ? '' : 'none';
+    if (chk) {
+      // 以前检查中/安装中会把按钮禁用。禁用后点击不触发任何事件，
+      // 用户连点几次都毫无反应，看着就像按钮坏了。改成一直可点，
+      // 由 updCheck 自己给一句「正在检查，请稍候」。
+      chk.disabled = false;
+      chk.textContent = UPD.checking ? '检查中…' : '检查更新';
+    }
+    var cur = $('#updCur');
+    if (cur) cur.textContent = '当前版本 ' + (UPD.cur || '—') +
+      (UPD.latest ? ' · 最新版 ' + UPD.latest : '');
+    var msg = $('#updMsg');
+    if (msg) {
+      if (needRst && UPD.hasUpdate) {
+        // 两种状态叠在一起：上次装的还没重启生效，发布页上又出了更新版本。
+        // 以前这里只提「重启」，用户就会觉得「更新完版本号又退回去了」。
+        msg.innerHTML = '<b style="color:#B26A00">上次装的版本还没生效（要重启）；发布页上已经有更新的 '
+          + esc(UPD.latest) + '，点「立即更新」直接升到它，重启一次就行。</b>';
+      } else if (needRst) {
+        // 写清「换成哪个版本」：新版文件已经落在磁盘上，但当前进程还在跑旧代码，
+        // 只写「已替换完成」会让人以为已经生效了。
+        var _nv = UPD.latest ? ('新版 ' + esc(UPD.latest)) : '新版';
+        // 只有「正在跑的版本」和装上的不是同一个才写出来，否则会变成
+        // 「新版 1.5.9 已就位，当前还跑着 1.5.9」这种自相矛盾的说法。
+        var _still = (UPD.cur && UPD.cur !== UPD.latest)
+          ? ('当前还跑着 ' + esc(UPD.cur) + '，') : '';
+        msg.innerHTML = '<b style="color:#1A7F45">' + _nv +
+          ' 的文件已就位，' + _still + '点「重启程序」后生效。</b>';
+      } else if (UPD.lastErr) {
+        msg.textContent = UPD.lastErr;
+      } else if (UPD.checkedNote) {
+        msg.textContent = UPD.checkedNote;
+      } else if (UPD.installing) {
+        msg.textContent = '正在更新，请不要关闭软件…';
+      } else if (UPD.hasUpdate) {
+        if (UPD.confirmPending) {
+          msg.innerHTML = '<b style="color:#B26A00">再点一次「确认更新？」开始，6 秒内不点自动取消。</b>';
+        } else {
+          // 版本号必须写出来：以前只写清单里的说明，说明为空时这一行等于没说清新版是哪个。
+          msg.innerHTML = '发现新版本 <b>' + esc(UPD.latest) + '</b>' +
+            (UPD.notes ? '：' + esc(UPD.notes) : '') +
+            (UPD.checkedAt ? '（' + UPD.checkedAt + ' 检查）' : '') +
+            '，点「立即更新」替换程序文件。';
+        }
+      } else {
+        msg.textContent = '';
+      }
+    }
+  }
+  // 检查更新的结果统一从这里进：两处（自动/手动）共用一份逻辑，
+  // 免得一边改一边忘——以前 needRestart 只在手动那路写 true，
+  // 结果被旧数据顶起来以后再也下不去。
+  function updTakeCheck(r) {
+    if (!r || !r.ok) return false;
+    // 进设置页会自动查一次，那次读的是「今天早先」的缓存。如果刚手动查到有新版，
+    // 不能让这条旧缓存把它冲回「已是最新」——否则按钮刚出现又消失。
+    if (r.skipped && UPD.hasUpdate && r.hasUpdate === false) return false;
+    if (r.version) UPD.latest = r.version;
+    if (typeof r.hasUpdate === 'boolean') UPD.hasUpdate = r.hasUpdate;
+    UPD.cur = r.runVersion || r.current || UPD.cur;
+    UPD.curIsRun = !!r.runVersion;
+    if (r.appliedVersion) UPD.applied = r.appliedVersion;
+    // 必须双向赋值：只写 true 的话，某次旧数据报了 true 就永远下不来，
+    // 于是「已是最新版本」还会一直挂着「重启程序」。
+    if (typeof r.needRestart === 'boolean') UPD.needRestart = r.needRestart;
+    if (r.error) UPD.lastErr = r.error;
+    return true;
+  }
+  // 从后端读缓存状态：进设置页时调一次，页面刚打开时若上次更新没重启也能提示
+  function updRefresh() {
+    if (DEMO) return;
+    api('/api/update/status').then(function (s) {
+      if (!s || typeof s.running !== 'boolean') return;   // status 的 ok 是「安装结果」，不能当请求成功用
+      UPD.cur = s.runVersion || s.current || UPD.cur;   // runVersion＝正在跑的版本，未重启时它才是「当前版本」
+      UPD.curIsRun = !!s.runVersion;
+      UPD.installing = !!s.running;
+      UPD.applied = s.appliedVersion || UPD.applied;
+      UPD.needRestart = !!s.needRestart;
+      if (s.running) updPoll();
+      updButtons();
+    });
+    api('/api/update/config').then(function (c) {
+      if (c && c.ok) { UPD.cur = c.runVersion || c.current || UPD.cur; updButtons(); }
+    });
+    // 把自动检查（每天一次）查到的新版也显示出来
+    api('/api/update/check?auto=1').then(function (r) {
+      if (!updTakeCheck(r)) return;
+      updButtons();
+    });
+  }
+  function updCheck() {
+    if (UPD.installing) { toast('正在更新，请稍候…'); return; }
+    // 正在检查时再点：给一句回应。以前直接 return，用户连点几次都毫无动静。
+    // 超过 26 秒还没结果就当卡住了，允许重新发起。
+    if (UPD.checking && Date.now() - (UPD.checkStart || 0) < 26000) {
+      toast('正在检查，请稍候…'); return;
+    }
+    UPD.checking = true; UPD.checkStart = Date.now();
+    UPD.lastErr = ''; UPD.checkedNote = ''; updButtons();
+    updBar(true, '正在检查新版…', -1);
+    // 25 秒超时：网络卡住时 fetch 可能一直不返回，状态就会永远停在「检查中」，
+    // 之后每次点击都被当成重复点击吞掉，看着就是按钮没反应。
+    api('/api/update/check', { timeout: 25000 }).then(function (r) {
+      UPD.checking = false;
+      if (!r || !r.ok) {
+        UPD.lastErr = hhmmss() + ' 检查失败：' +
+          ((r && (r.error || r.msg)) || '请稍后再试');
+        updBar(false); updButtons(); return;
+      }
+      updTakeCheck(r);
+      UPD.notes = r.notes || '';
+      UPD.checkedAt = hhmmss();
+      // 已是最新时进度条 2 秒后自己消失，界面一点痕迹都不留，看着就跟没点一样。
+      // 这里留一句话，并且带上时间——用户能确认「这条就是我刚才那次点出来的」。
+      UPD.checkedNote = UPD.hasUpdate ? ''
+        : (UPD.checkedAt + ' 检查完成 · 已是最新版 ' + (UPD.latest || UPD.cur || ''));
+      updBar(false, UPD.hasUpdate ? ('发现新版 ' + r.version) : '已是最新版',
+             UPD.hasUpdate ? -1 : 100);
+      setTimeout(function () { updBar(false); }, UPD.hasUpdate ? 6000 : 2000);
+      updButtons();
+    });
+  }
+  var UPD_CONFIRM_TIMER = null;
+  function updInstall() {
+    if (!UPD.hasUpdate || UPD.installing) return;
+    // 不用原生 confirm()：双屏/窗口失焦时弹窗可能落在看不见的屏，甚至让进程直接退出。
+    // 改成页面内二次点击：第一次点变成确认态，6 秒内再点一次才真正开始。
+    if (!UPD.confirmPending) {
+      UPD.confirmPending = true;
+      updButtons();
+      if (UPD_CONFIRM_TIMER) clearTimeout(UPD_CONFIRM_TIMER);
+      UPD_CONFIRM_TIMER = setTimeout(function () {
+        UPD.confirmPending = false; UPD_CONFIRM_TIMER = null; updButtons();
+      }, 6000);
+      return;
+    }
+    if (UPD_CONFIRM_TIMER) { clearTimeout(UPD_CONFIRM_TIMER); UPD_CONFIRM_TIMER = null; }
+    UPD.confirmPending = false;
+    UPD.installing = true; UPD.lastErr = '';
+    UPD.hasUpdate = false;   // 装上后先收起「立即更新」，等重启完成再判断
+    updButtons(); updBar(true, '准备更新…', -1);
+    api('/api/update/install', { method: 'POST', body: '{}' }).then(function (r) {
+      if (!r || !r.ok) {
+        UPD.installing = false; UPD.lastErr = (r && r.error) || '启动更新失败';
+        updBar(false); updButtons(); return;
+      }
+      updPoll();
+    });
+  }
+  function updPoll() {
+    var fails = 0;
+    var tick = function () {
+      // status 的 ok 是「安装结果」，不是请求成功，所以这里用超时+重试兜住网络抖动
+      api('/api/update/status', { timeout: 10000 }).then(function (s) {
+        if (!s || typeof s.running !== 'boolean') {
+          // 读不到进度时以前直接 return，进度条永远停在原处、安装态也退不出来。
+          if (UPD.installing && fails < 8) { fails++; setTimeout(tick, 800); return; }
+          UPD.installing = false;
+          UPD.lastErr = '读不到更新进度，请点「检查更新」确认结果';
+          updBar(false); updButtons(); return;
+        }
+        fails = 0;
+        var pct = (typeof s.pct === 'number') ? s.pct : -1;
+        var txt = (s.phase === 'download') ? '正在下载更新包'
+                : (s.phase === 'verify') ? '正在校验更新包'
+                : (s.phase === 'backup') ? '正在备份原文件'
+                : (s.phase === 'apply' || s.phase === 'extract') ? '正在替换程序文件' : (s.text || '更新中');
+        updBar(true, txt, pct, pct < 0 && s.total ? (s.done + '/' + s.total) : null);
+        updButtons();   // 安装中也要刷文案区，别把「再点一次确认更新」留在界面上
+        if (s.running) { setTimeout(tick, 600); return; }
+        UPD.installing = false;
+        UPD.needRestart = !!s.needRestart;
+        if (s.ok) {
+          UPD.latest = s.appliedVersion || UPD.latest;
+          UPD.applied = s.appliedVersion || UPD.applied;
+          // 装完就一定得重启一次。这里不要听任何一路数据的（轮询/切页的旧响应
+          // 可能把 needRestart 冲回 false，按钮就消失了，用户只能手动关掉重开）。
+          UPD.needRestart = true;
+          UPD.lastErr = '';
+          toast('更新完成，请重启程序');
+        }
+        else { UPD.lastErr = s.error || '更新失败'; }
+        updButtons();
+      });
+    };
+    tick();
+  }
+  function updRestart() {
+    // 先清「待重启」标记，免得新版本启动后又提示一次
+    api('/api/update/restartflag', { method: 'POST', body: '{}' });
+    if (window.desktopUpdater && window.desktopUpdater.restart) {
+      window.desktopUpdater.restart().catch(function () { toast('重启失败，请手动关掉程序再打开'); });
+    } else {
+      // 浏览器里直接开界面（没有 Electron 壳）：只能退出，由用户自己重开
+      toast('浏览器预览模式不能自动重启，请手动关掉页面再打开程序');
+      quitApp();
+    }
+  }
   function quitApp() { if (!DEMO) api('/api/quit', { method: 'POST' }); }
 
   // ---------- 演示数据（无后端时回落到设计稿样式）----------
@@ -4538,6 +4960,12 @@
   window.openShot = openShot;
   window.openShotDir = openShotDir;
   window.quitApp = quitApp;
+  window.updCheck = updCheck;
+  window.updInstall = updInstall;
+  window.updPoll = updPoll;
+  window.updRestart = updRestart;
+  window.updRefresh = updRefresh;
+  window.__UPD = UPD;                  // 回归测试读内部状态用
   window.closeSiteModal = closeSiteModal;
   window.openBatchModal = openBatchModal;
   window.closeBatchModal = closeBatchModal;
@@ -4555,6 +4983,10 @@
   window.locateIdx = locateIdx;
   window.wTab = wTab;
   window.onDevQ = onDevQ;
+  window.applyDevQ = applyDevQ;    // 回归测试：验证筛选后上下键只在可见行切换
+  window.renderDevices = renderDevices;  // 回归测试：构造设备行验证多选与拖出路径
+  window.devNavTarget = devNavTarget;
+  window.__getPVDEV = function () { return PVDEV; };   // 回归测试：确认上下键切到了哪台
   window.onAccQ = onAccQ;      // 左侧「搜索账号」输入框（内联 oninput 只认 window 上的名字）
   window.watchToggleBtn = watchToggleBtn;
   window.histReload = histReload;

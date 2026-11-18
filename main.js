@@ -2,7 +2,7 @@
 // 职责：拉起同目录的 python 后端（webui_server.py，无头模式），
 // 后端自动分配端口并写入临时文件，本进程轮询读取后让真 Chromium 加载界面。
 // 关闭窗口时杀掉 python 子进程，不留后台残留。
-const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage, clipboard, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, screen, Tray, nativeImage, clipboard, shell, ipcMain } = require('electron');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const path = require('path');
@@ -466,6 +466,121 @@ function downgradeToSoftware() {
   setTimeout(() => { QUIT = true; app.quit(); }, 800);
 }
 
+// ---- 内置更新：重启按钮 ----
+// 更新包替换的是 resources/app 下的程序文件，必须重开进程才生效。
+// 只用 app.relaunch() 不够可靠：实测点完重启程序就关了、没有再起来。原因是
+// relaunch 安排的新进程可能撞上老进程还没释放的单实例锁（requestSingleInstanceLock），
+// 新进程一拿不到锁就直接 app.quit()，用户看到的就是「关了但没开」。
+// 这里做两层：
+//   1. 主层 app.relaunch() + app.quit()（官方顺序，quit 会走 will-quit 清会话标记）
+//   2. 兜底一个独立 shell 进程，等老 PID 真的消失后再拉起程序；两层都起来也无害，
+//      多出来的那个会被单实例锁挡掉。
+// 注意：第二层以前只在打包运行时才安排（`if (app.isPackaged === false) return;`）。
+// Mac 上程序不是打包的 —— 双击 一键启动-Mac.command 走 npm start → electron .，
+// app.isPackaged 为 false —— 于是 Mac 只剩 relaunch 一层，正好是 Windows 上翻车
+// 的那条路。现在非打包也给兜底：命令行 = execPath + [应用目录]，与 relaunch 语义一致。
+function restartSpec() {
+  const packed = app.isPackaged !== false;
+  const exe = process.execPath;
+  // 打包：exe 自己就是程序，参数为空（与 relaunch 默认一致）。
+  // 非打包：exe 是 electron，必须把应用目录当参数传过去，否则拉起来是个空壳。
+  const args = packed ? [] : [app.getAppPath()];
+  return { packed: packed, exe: exe, args: args, workdir: args.length ? args[0] : path.dirname(exe) };
+}
+
+function spawnRestartFallback() {
+  const spec = restartSpec();
+  const pid = process.pid;
+  const exe = spec.exe;
+  const workdir = spec.workdir;
+  try {
+    if (process.platform === 'win32') {
+      // 安装路径含中文：不写 .bat（编码会烂），直接把命令作为 argv 传给 PowerShell。
+      const argPs = spec.args.length
+        ? ' -ArgumentList \'' + spec.args[0].replace(/'/g, "''") + '\''
+        : '';
+      const ps = 'while (Get-Process -Id ' + pid + ' -ErrorAction SilentlyContinue) '
+        + '{ Start-Sleep -Milliseconds 200 }; Start-Process -FilePath \''
+        + exe.replace(/'/g, "''") + '\'' + argPs + ' -WorkingDirectory \''
+        + workdir.replace(/'/g, "''") + '\'';
+      const p = spawn('powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', ps],
+        { detached: true, stdio: 'ignore', windowsHide: true });
+      p.unref();
+      log('[更新] 已安排 PowerShell 重启兜底，等 PID', pid, '退出后拉起', exe,
+        spec.args.length ? ('参数 ' + spec.args[0]) : '');
+    } else {
+      // macOS / Linux：等 PID 消失再启动。打包时 exe 在 .app 包内，直接执行即可；
+      // 非打包时（Mac 的 npm start）exe 是 Electron 本体，得把应用目录当第一个参数。
+      const q = (s) => '"' + String(s).replace(/"/g, '\\"') + '"';
+      const sh = 'while kill -0 ' + pid + ' 2>/dev/null; do sleep 0.2; done; exec '
+        + [exe].concat(spec.args).map(q).join(' ');
+      const p = spawn('/bin/sh', ['-c', sh], { detached: true, stdio: 'ignore' });
+      p.unref();
+      log('[更新] 已安排 shell 重启兜底，等 PID', pid, '退出后拉起', exe,
+        spec.args.length ? ('参数 ' + spec.args[0]) : '');
+    }
+  } catch (e) {
+    log('[更新] 外部重启兜底安排失败:', e.message);
+  }
+}
+
+ipcMain.handle('updater:restart', () => {
+  log('[更新] 用户点「重启程序」');
+  try {
+    if (backend) { try { backend.kill('SIGKILL'); } catch (e) { /* ignore */ } backend = null; }
+    QUIT = true;
+    if (tray) { try { tray.destroy(); } catch (e) { /* ignore */ } tray = null; }
+    if (mainWin && !mainWin.isDestroyed()) {
+      try { mainWin.close(); } catch (e) { /* ignore */ }
+    }
+    spawnRestartFallback();
+    app.relaunch();
+    log('[更新] relaunch 已安排，当前实例退出');
+  } catch (e) {
+    log('[更新] relaunch 失败:', e.message);
+    return { ok: false, error: e.message };
+  }
+  // quit 走正常退出流程（will-quit 会清 .session-alive，不误报崩溃）。
+  // 极少数情况下 quit 被卡住，留一个 5 秒强退兜底，避免进程僵死。
+  app.quit();
+  setTimeout(() => { try { app.exit(0); } catch (e) { /* ignore */ } }, 5000);
+  return { ok: true };
+});
+
+// ---- 巡站截图：把选中的截图当真实图片文件拖到系统其它窗口 ----
+// 渲染层 dragstart 里 sendSync 过来，这里立刻 startDrag 并同步返回，走系统原生拖拽。
+// 拖拽预览直接拿第一张截图缩放成缩略图，让用户拖之前就看到要带走的是哪张图。
+ipcMain.on('patrol:dragstart', (event, files) => {
+  let done = false;
+  try {
+    if (!Array.isArray(files) || !files.length) { event.returnValue = false; return; }
+    const ok = files.filter(function (f) {
+      return typeof f === 'string' && path.isAbsolute(f)
+        && path.extname(f).toLowerCase() === '.png' && fs.existsSync(f);
+    });
+    if (!ok.length) { event.returnValue = false; return; }
+    // 预览图＝第一张截图的缩略图（高度 200px 内，保持比例）；读不出来再退回软件图标
+    let icon = nativeImage.createFromPath(ok[0]);
+    if (!icon.isEmpty() && typeof icon.resize === 'function') {
+      try { icon = icon.resize({ height: 200, quality: 'good' }); } catch (e) { /* 用原图 */ }
+    }
+    if (icon.isEmpty()) icon = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
+    try {
+      event.sender.startDrag({ files: ok, icon: icon });
+      done = true;
+    } catch (e) {
+      // 老版本 Electron 没有 files 选项时至少保住单选拖拽，不让按钮整个失灵
+      log('[拖拽] 多文件不受支持，退回单文件:', e && e.message);
+      event.sender.startDrag({ file: ok[0], icon: icon });
+      done = true;
+    }
+  } catch (e) {
+    log('[拖拽] 启动失败:', e && e.message);
+  }
+  event.returnValue = done;
+});
+
 const PORT_FILE = path.join(os.tmpdir(), 'usrcloud_patrol_port.txt');
 let backend = null;
 
@@ -854,6 +969,28 @@ function setupEditKeys(win) {
   });
 }
 
+// 每天一次的内置更新检查：后端自己判断「今天查过没」，查过就直接回缓存。
+// 页面加载完 3 秒后再发，避开启动高峰；失败一律静默（不能因为外网不通拖慢启动）。
+function autoUpdateCheck(port) {
+  setTimeout(() => {
+    const req = http.get({ host: '127.0.0.1', port: port,
+                           path: '/api/update/check?auto=1', timeout: 30000 }, (res) => {
+      let raw = '';
+      res.on('data', (c) => { raw += c; });
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(raw);
+          if (j && j.ok && !j.skipped) {
+            log('[更新] 每日检查完成：当前 ' + (j.current || '?') +
+                ' · 最新 ' + (j.version || '?') + ' · 有新版=' + !!j.hasUpdate);
+          }
+        } catch (e) { /* ignore */ }
+      });
+    });
+    req.on('error', () => { /* 后端短暂未就绪 / 外网不通，忽略 */ });
+  }, 3000);
+}
+
 function createWindow(port) {
   const bd = loadBounds();
   // 把「检测到了几块屏、各自多大、窗口落在哪块屏、最终开多大」全部打出来，
@@ -885,6 +1022,9 @@ function createWindow(port) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // 只暴露 window.desktopUpdater.restart() 给「重启程序」按钮；
+      // 更新检查/下载/进度都在 Python 后端，页面用普通 fetch 调用。
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
   win.once('ready-to-show', () => { log('ready-to-show → show()'); win.show(); });
@@ -1053,6 +1193,7 @@ function createWindow(port) {
   });
   win.webContents.on('did-finish-load', () => {
     log('页面已加载:', win.webContents.getURL());
+    autoUpdateCheck(port);   // 每天一次的内置更新检查（后端去重，同一天不会重复打 GitHub）
     // 点击系统通知跳转时页面可能还没就绪，指令先存进 PENDING_NAV，这里补执行一次，
     // 保证「点通知跳到对应站点」一定生效（冷启动带参数启动也走这条路）。
     if (PENDING_NAV) {

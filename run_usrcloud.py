@@ -2351,7 +2351,7 @@ def main():
     args, unknown = ap.parse_known_args()
     if unknown:
         print('[提示] 忽略了无法识别的参数: {}。'.format(' '.join(unknown)))
-        print('       这通常是启动器与 run_usrcloud.py 版本不匹配——请到网盘重新下载最新工具包覆盖。')
+        print('       这通常是启动器与 run_usrcloud.py 版本不匹配——请到项目主页重新下载最新工具包覆盖。')
 
     migrate_old_tokens()      # 旧版散落的登录缓存自动归纳进 登录缓存/
 
