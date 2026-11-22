@@ -1906,7 +1906,11 @@ class WatchEngine:
             wset = set(want)
             sel = [p for p in plst if (p.get('name') or '') in wset][:max_vars]
         else:
-            sel = plst[:max_vars]
+            # 没指定变量时按排序规则优先挑：出水/进水/供水/回水温度先入选，
+            # 剩下的名额按平台原顺序补满。旧版直接 plst[:max_vars] 取前 6 个，
+            # 温度排在平台列表后面就被砍掉，折线图看不到任何温度曲线。
+            import varsort as VS
+            sel = VS.pick_top(plst, lambda p: p.get('name') or '', limit=max_vars)
         if not sel:
             return {'ok': True, 'vars': meta, 'series': {}, 'hours': hours}
         name_by_rel = {}

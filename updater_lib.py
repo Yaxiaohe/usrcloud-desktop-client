@@ -46,6 +46,9 @@ PUBLIC_FILES = (
     'run_usrcloud.py', 'usr_control.py', 'varsort.py',
     'watch_engine.py', 'webui_server.py',
     'ui/index.html', 'build/icon.ico', 'build/icon.png',
+    # macOS 专属资源：菜单栏托盘小图（含 Retina）与 Dock 大图标。
+    # 不加这三条，Mac 版更新包在清单校验和安装校验两处都会被 is_allowed_file 拒掉。
+    'build/tray.png', 'build/tray@2x.png', 'build/icon_mac_1024.png',
     '使用说明.txt', '更新记录.txt',
 )
 # 私密通道额外允许：账号表 + 用户配置 + 登录缓存（只放 json）
@@ -292,8 +295,19 @@ def check(manual=False):
     state = read_state()
     if not manual and not needs_daily_check(state):
         cached = dict(state.get('lastCheck') or {})
-        cached.update({'ok': True, 'skipped': True, 'runVersion': BOOT_VERSION,
-                       'needRestart': need_restart(state)})
+        run = BOOT_VERSION
+        disk = current_version()
+        # 缓存只能记「网盘上现在是哪个版本」，不能连「要不要更新」一起照抄：
+        # 那份 hasUpdate 是当天早些时候算出来的，那时可能还跑着旧版本。
+        # 典型现象：装完新版重启后进设置页走这条缓存 → 界面上「当前版本 1.5.18」
+        # 旁边又冒出「立即更新」（缓存是 1.5.17 时算的 hasUpdate=True）。
+        # 所以「要不要更新」一律拿已经到手的最高版本重新算，不联网、几乎不花时间。
+        # 已经到手的最高版本：正在跑的 vs 磁盘上的（装完未重启时后者更新）。
+        base = disk if is_newer(disk, run) else run
+        if cached.get('version'):
+            cached['hasUpdate'] = is_newer(cached['version'], base)
+        cached.update({'ok': True, 'skipped': True, 'runVersion': run,
+                       'current': disk, 'needRestart': need_restart(state)})
         return cached
 
     try:
@@ -321,6 +335,8 @@ def check(manual=False):
         'ok': True, 'hasUpdate': res['hasUpdate'], 'version': m['version'],
         'current': cur, 'notes': m['notes'], 'patchSize': m['size'],
         'channel': m['channel'], 'manifest': m,
+        # 记下这次是拿哪个「正在跑的版本」比的：升级重启后能一眼看出缓存过期
+        'runVersion': BOOT_VERSION,
     }
     write_state(state)
     return res

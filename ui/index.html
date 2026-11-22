@@ -698,13 +698,13 @@
           <input id="devQH" placeholder="搜索站点…" oninput="onDevQ('devListH')"
             style="height:32px;width:150px;border:1px solid #E1E4E9;border-radius:8px;padding:0 10px;font-size:12px;color:#3A4048">
           <select id="hSrc" onchange="histReload()" style="height:32px;border:1px solid #E1E4E9;border-radius:8px;padding:0 6px;font-size:12px;color:#3A4048">
-            <option value="local" selected>本地记录</option>
-            <option value="cloud">云端历史</option>
+            <option value="local">本地记录</option>
+            <option value="cloud" selected>云端历史</option>
           </select>
           <select id="hRange" onchange="histReload()" style="height:32px;border:1px solid #E1E4E9;border-radius:8px;padding:0 6px;font-size:12px;color:#3A4048">
-            <option value="24">近 24 小时</option>
+            <option value="24" selected>近 24 小时</option>
             <option value="72">近 3 天</option>
-            <option value="168" selected>近 7 天</option>
+            <option value="168">近 7 天</option>
             <option value="720">近 30 天</option>
           </select>
           <button class="btn" onclick="histReload()">刷新</button>
@@ -881,7 +881,7 @@
           </p>
         </div>
       </div>
-      <div class="row"><label>关于</label><span>有人云巡站客户端 v1.5.14（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
+      <div class="row"><label>关于</label><span>有人云巡站客户端 <b id="aboutVer">v—</b>（Electron 壳 + Python 后端，多端自适应，随窗口与屏幕分辨率缩放） · by Yang</span></div>
       <div class="row"><label>项目地址</label><a class="lk" href="https://github.com/Yaxiaohe/usrcloud-desktop-client" target="_blank" rel="noopener" title="用系统浏览器打开">GitHub 主页 ›</a></div>
       <div class="row"><label></label><button class="btn" onclick="quitApp()">退出程序</button></div>
     </div></section>
@@ -4672,7 +4672,35 @@
     }
     if (done != null && pct < 0) lab.textContent = done;
   }
+  // 版本号比较：'1.5.10' > '1.5.9'。只认 x.y.z，取不到的那段当 0。
+  function verCmp(a, b) {
+    var pa = String(a || '').split('.'), pb = String(b || '').split('.');
+    for (var i = 0; i < 3; i++) {
+      var x = parseInt(pa[i], 10) || 0, y = parseInt(pb[i], 10) || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+  // 最后一道常识：清单上的版本不比正在跑的版本高，就不算「有新版」。
+  // 这挡的是脏数据——最典型的是升级重启后，进设置页自动读到的「当天早些时候」
+  // 那份缓存，它是在旧版本上比出来的 hasUpdate=true，照抄就会出现
+  // 「当前版本 1.5.18 · 最新版 1.5.18」却还挂着「立即更新」。
+  function updSettle() {
+    if (UPD.hasUpdate && UPD.latest) {
+      // 「已经到手的最高版本」：正常运行就是当前版本；装完还没重启时，
+      // 磁盘上那份（applied）比正在跑的新，得拿它当基准，否则会出现
+      // 「新版 1.5.18 的文件已就位」旁边又写「网盘上有更新的 1.5.18」。
+      var base = (UPD.applied && UPD.cur && verCmp(UPD.applied, UPD.cur) > 0)
+        ? UPD.applied : UPD.cur;
+      if (base && verCmp(UPD.latest, base) <= 0) {
+        UPD.hasUpdate = false;
+        UPD.confirmPending = false;
+      }
+    }
+    return UPD.hasUpdate;
+  }
   function updButtons() {
+    updSettle();   // 画之前先归一，任何一路脏数据都别想画出「立即更新」
     var ins = $('#updInstallBtn'), rst = $('#updRestartBtn'), chk = $('#updCheckBtn');
     // 最后一道保险：装上的版本就是正在跑的版本，说明早就重启过了，
     // 不管哪一路数据说「待重启」都不该再露出按钮（后端也算同一条规则）。
@@ -4703,6 +4731,10 @@
     var cur = $('#updCur');
     if (cur) cur.textContent = '当前版本 ' + (UPD.cur || '—') +
       (UPD.latest ? ' · 最新版 ' + UPD.latest : '');
+    // 「关于」里那行版本号以前是写死的（1.5.14 之后一直没改），跟上面「当前版本」对不上，
+    // 看着就像版本号没升上去。改成跟当前运行的版本走。
+    var av = $('#aboutVer');
+    if (av) av.textContent = 'v' + (UPD.cur || '—');
     var msg = $('#updMsg');
     if (msg) {
       if (needRst && UPD.hasUpdate) {
@@ -4748,7 +4780,10 @@
     if (!r || !r.ok) return false;
     // 进设置页会自动查一次，那次读的是「今天早先」的缓存。如果刚手动查到有新版，
     // 不能让这条旧缓存把它冲回「已是最新」——否则按钮刚出现又消失。
-    if (r.skipped && UPD.hasUpdate && r.hasUpdate === false) return false;
+    // 但只有「缓存里记的版本比已经查到的旧」时才拦：缓存自己过期了还拦着，
+    // 就会把真结果一直压住，界面永远停在旧结论上。
+    if (r.skipped && r.hasUpdate === false && UPD.hasUpdate &&
+        r.version && UPD.latest && verCmp(r.version, UPD.latest) < 0) return false;
     if (r.version) UPD.latest = r.version;
     if (typeof r.hasUpdate === 'boolean') UPD.hasUpdate = r.hasUpdate;
     UPD.cur = r.runVersion || r.current || UPD.cur;
@@ -4758,6 +4793,7 @@
     // 于是「已是最新版本」还会一直挂着「重启程序」。
     if (typeof r.needRestart === 'boolean') UPD.needRestart = r.needRestart;
     if (r.error) UPD.lastErr = r.error;
+    updSettle();
     return true;
   }
   // 从后端读缓存状态：进设置页时调一次，页面刚打开时若上次更新没重启也能提示
@@ -4965,6 +5001,8 @@
   window.updPoll = updPoll;
   window.updRestart = updRestart;
   window.updRefresh = updRefresh;
+  window.verCmp = verCmp;              // 回归测试直接验版本号比较（按数字段比）
+  window.updButtons = updButtons;
   window.__UPD = UPD;                  // 回归测试读内部状态用
   window.closeSiteModal = closeSiteModal;
   window.openBatchModal = openBatchModal;

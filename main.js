@@ -725,6 +725,7 @@ function loadBounds() {
 let tray = null;
 let QUIT = false;
 let mainWin = null;
+let LAST_PORT = 0;         // 后端端口：macOS 上点程序坞图标重建窗口时要用（窗口关了后端还在）
 let TRAY_HIDDEN = false;   // 用户主动收进托盘后置位，防止启动兜底 show() 把窗口又弹回来
 
 function readCloseMode() {
@@ -992,6 +993,7 @@ function autoUpdateCheck(port) {
 }
 
 function createWindow(port) {
+  LAST_PORT = port;   // macOS 窗口全关后还要能靠它重建页面
   const bd = loadBounds();
   // 把「检测到了几块屏、各自多大、窗口落在哪块屏、最终开多大」全部打出来，
   // 方便核对分辨率识别是否正确（DIP 已含 DPI 折算：2560×1440 @125% 会报 2048×1104）
@@ -1231,8 +1233,23 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   // 托盘模式下窗口只是被隐藏，并不会触发这个事件；真退出时才走到这
+  // macOS：窗口关掉不等于退出程序（用户可能只想关窗，之后还能点程序坞图标回来）。
+  // 此时必须把后端留着，否则点回来是一片白：页面能开、数据全是空的。
+  if (process.platform === 'darwin' && tray) {
+    log('[托盘] 窗口已全部关闭，macOS 保留进程（点程序坞图标可还原）');
+    return;
+  }
   if (backend) { try { backend.kill('SIGKILL'); } catch (e) { /* ignore */ } backend = null; }
   app.quit();
+});
+
+// macOS 专属：点程序坞（Dock）图标 / 从 Finder 重新打开时还原窗口。
+// Windows 没有这个事件，写在这里不影响 Windows。
+app.on('activate', () => {
+  if (process.platform !== 'darwin') return;
+  if (mainWin && !mainWin.isDestroyed()) { showMainWindow(); return; }
+  if (LAST_PORT) { createWindow(LAST_PORT); return; }
+  log('[托盘] 收到 activate，但还没有可用端口，跳过重建窗口');
 });
 
 // 托盘右键「退出程序」/ 系统退出时，确保 python 子进程不残留

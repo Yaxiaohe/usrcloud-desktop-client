@@ -46,6 +46,18 @@ CLOSE_MODE_FILE = os.path.join(BASE, '关闭方式.json')  # 关闭按钮行为�
 UPDATE_TRACE = os.path.join(BASE, '更新诊断.txt')   # 每次「检查更新」记一行，界面说没反应时先看这里
 
 
+def _upd_check(auto):
+    """跑一次检查更新。auto=1 是每天一次的静默检查，可以回当天缓存；
+    不带参数是用户点的「检查更新」，必须现查。
+
+    两个概念别混：check() 的入参是 manual（是手动吗），auto 是「是不是静默检查」，
+    正好互为反面。以前这里直接写 check(auto)，传反了 —— 手动检查被当成自动、
+    一直回当天的旧缓存，界面就一直显示「已是最新」；换成自动检查反而每次去现查。
+    用户看到的现象是「非要把页面切走再切回设置页，更新提醒才冒出来」。
+    """
+    return updater_lib.check(manual=not auto)
+
+
 def _log_update_check(auto, r, cost):
     """把一次检查更新记一行：谁发起的、结论、耗时，最多留 400 行。
 
@@ -923,7 +935,7 @@ class Handler(BaseHTTPRequestHandler):
                 _t0 = time.time()
                 _res = None
                 try:
-                    _res = updater_lib.check(auto)
+                    _res = _upd_check(auto)
                 finally:
                     _log_update_check(auto, _res, time.time() - _t0)
                 return self._json(_res)

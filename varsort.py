@@ -162,3 +162,18 @@ def order(items, name_of=None, rules=None):
     # Python 的 sorted 是稳定排序：同 rank 的项保持原相对顺序，
     # 所以「没配置的变量」不会因为排序而互相换位置。
     return sorted(seq, key=lambda x: rank(get(x), rules))
+
+
+def pick_top(items, name_of=None, limit=6, rules=None):
+    """按规则排序后只挑前 limit 个：温度关键词置顶，其余保持平台原顺序补满。
+
+    云端历史每轮最多拉 max_vars 个变量（省平台请求）。旧版直接取平台返回的
+    前几个，温度往往排在后面就被砍掉，折线图里一个温度都看不到——前端排序
+    规则再对也没用，因为变量压根没被拉下来。这里改成先按 varsort 规则排，
+    再截取，保证出水/进水/供水/回水温度先入选。
+
+    limit<=0 返回空；limit 超过总数返回全部；rules 显式传入时是零依赖纯函数。
+    """
+    if limit <= 0:
+        return []
+    return order(items, name_of=name_of, rules=rules)[:limit]

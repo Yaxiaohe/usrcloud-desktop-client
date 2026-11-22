@@ -46,6 +46,11 @@ var PUBLIC_FILES = [
   'ui/index.html',
   'build/icon.ico',
   'build/icon.png',
+  // macOS 专属：菜单栏托盘小图（含 Retina）与 Dock 大图标，
+  // 少了它们 Mac 更新包会在清单/安装两处校验被拒。
+  'build/tray.png',
+  'build/tray@2x.png',
+  'build/icon_mac_1024.png',
   '使用说明.txt',
   '更新记录.txt'
 ];
