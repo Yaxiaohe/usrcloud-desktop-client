@@ -297,7 +297,7 @@ def check(manual=False):
         cached = dict(state.get('lastCheck') or {})
         run = BOOT_VERSION
         disk = current_version()
-        # 缓存只能记「网盘上现在是哪个版本」，不能连「要不要更新」一起照抄：
+        # 缓存只能记「清单源上现在是哪个版本」，不能连「要不要更新」一起照抄：
         # 那份 hasUpdate 是当天早些时候算出来的，那时可能还跑着旧版本。
         # 典型现象：装完新版重启后进设置页走这条缓存 → 界面上「当前版本 1.5.18」
         # 旁边又冒出「立即更新」（缓存是 1.5.17 时算的 hasUpdate=True）。

@@ -948,6 +948,23 @@
     </div>
   </div>
 
+  <!-- 通用二次确认弹窗：删除账号等危险操作用。不调原生 confirm()——它是原生层
+       模态框：双屏/窗口失焦时可能弹到另一块屏或被主窗口挡住（看着像卡死），
+       弹着的时候整页脚本停住（刷新、巡检轮询都跟着冻），早期软渲染配置上还
+       出过进程直接退出的闪退。本程序 v1.4.3 起默认开硬件加速，但原生层这条
+       路径依旧不碰。 -->
+  <div class="mwrap" id="confirmModal">
+    <div class="mbox" style="width:380px">
+      <div class="mhead"><span id="cfmTitle">确认操作</span><button class="x" onclick="cfmCancel()" title="关闭">✕</button></div>
+      <div class="mhint" style="color:#C77700" id="cfmHint"></div>
+      <div class="mlist" id="cfmBody" style="font-size:12.5px;line-height:2.1"></div>
+      <div class="mfoot">
+        <button class="btn" onclick="cfmCancel()">取消</button>
+        <button class="btn pri" id="cfmOk" onclick="cfmOk()">确认</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 关闭窗口时的选择：Electron 侧拦截 close 后调 window.__askClose() 打开 -->
   <div class="mwrap" id="closeModal">
     <div class="mbox cbox">
@@ -2138,6 +2155,33 @@
   }
   window.ctrlCancel = ctrlCancel;
   window.ctrlOk = ctrlOk;
+
+  // 通用页面内确认弹窗（删除账号等）：理由同上——不依赖原生层，双屏/失焦
+  // 不会弹错屏，也不阻塞页面脚本；危险操作的确认一律走这套。
+  var CFM_PEND = null;
+  function showConfirm(title, hint, bodyHtml, okText, onOk) {
+    CFM_PEND = onOk;
+    var t = $('#cfmTitle'); if (t) t.textContent = title || '确认操作';
+    var h = $('#cfmHint'); if (h) h.innerHTML = hint || '';
+    var b = $('#cfmBody'); if (b) b.innerHTML = bodyHtml || '';
+    var k = $('#cfmOk'); if (k) k.textContent = okText || '确认';
+    var m = $('#confirmModal'); if (m) m.classList.add('show');
+  }
+  function cfmCancel() {
+    CFM_PEND = null;
+    var m = $('#confirmModal'); if (m) m.classList.remove('show');
+  }
+  function cfmOk() {
+    var f = CFM_PEND; CFM_PEND = null;
+    var m = $('#confirmModal'); if (m) m.classList.remove('show');
+    if (typeof f === 'function') {
+      try { f(); } catch (e) { alert('操作异常：' + ((e && e.message) || e)); }
+    }
+  }
+  window.showConfirm = showConfirm;
+  window.cfmCancel = cfmCancel;
+  window.cfmOk = cfmOk;
+
   function doWrite(i) {
     try {
       if (WRITING) return;
@@ -4069,8 +4113,14 @@
   }
   function vsSave(next) {
     if (!next || !next.length) {
-      if (!confirm('列表会变成空的，所有变量按平台原顺序显示。确定？')) return;
+      showConfirm('清空变量排序', '保存后列表会变成空的，请核对。',
+        '<div>所有变量改回平台原顺序显示。</div>',
+        '确认清空', function () { vsSaveDo(next); });
+      return;
     }
+    vsSaveDo(next);
+  }
+  function vsSaveDo(next) {
     VS_RULES = next;                                  // 先本地重绘，网络慢也不卡手
     paintVarSort();
     var msg = $('#setMsg');
@@ -4128,8 +4178,12 @@
     vsSave(rs);
   };
   window.vsReset = function () {
-    if (!confirm('恢复成默认四条（出水温度 → 进水温度 → 供水温度 → 回水温度）？自己加的关键词会丢掉。')) return;
-    vsSave(VS_DEF.map(function (r) { return { key: r.key, on: true }; }));
+    showConfirm('恢复默认排序', '恢复成默认四条，请核对。',
+      '<div>顺序：出水温度 → 进水温度 → 供水温度 → 回水温度</div>'
+      + '<div>自己加的关键词会丢掉。</div>',
+      '恢复默认', function () {
+        vsSaveDo(VS_DEF.map(function (r) { return { key: r.key, on: true }; }));
+      });
   };
 
   // ---------- 设置页：置顶站点（清单 + 选站弹窗） ----------
@@ -4179,9 +4233,12 @@
   };
   window.pnClearAll = function () {
     if (!PINS.length) { toast('当前没有置顶站点'); return; }
-    if (!confirm('取消全部 ' + PINS.length + ' 个置顶站点？取消后它们回到各自原来的位置。')) return;
-    PINS = []; savePins();
-    pinChanged('已取消全部置顶');
+    showConfirm('取消全部置顶', '共 <b>' + PINS.length + '</b> 个置顶站点将被取消。',
+      '<div>取消后它们回到各自原来的位置。</div>',
+      '全部取消', function () {
+        PINS = []; savePins();
+        pinChanged('已取消全部置顶');
+      });
   };
 
   var PN_DEVS = [], PN_Q = '';
@@ -4604,15 +4661,20 @@
         var bd = document.createElement('button'); bd.className = 'btn';
         bd.textContent = '删除';
         bd.onclick = function () {
-          if (!confirm('确定删除账号「' + a.name + '」？\n\n'
-            + '会从账号表里移除它，之后的巡检和截图都不再包含这个账号。\n'
-            + '（账号密码等数据不可恢复；历史批次里的截图不受影响）')) return;
-          api('/api/delaccount', { method: 'POST', body: JSON.stringify({ name: a.name }) })
-            .then(function (r) {
-              if (r && r.ok) {
-                if (SEL === a.name) { SEL = null; }
-                renderAccountsView(); loadAccounts();
-              } else alert((r && r.msg) || '删除失败');
+          // 不用原生 confirm()：那是原生层模态框，双屏/失焦时可能弹到看不见的
+          // 位置、弹着时整页脚本停住；危险操作统一走页面内弹窗。
+          showConfirm('删除账号', '确认后<b>立即从账号表移除</b>，请核对无误。',
+            '<div>账号：<b>' + esc(a.name) + '</b>（' + esc(a.account) + '）</div>'
+            + '<div>之后的巡检和截图都不再包含这个账号。</div>'
+            + '<div>账号密码不可恢复；历史批次里的截图不受影响。</div>',
+            '确认删除', function () {
+              api('/api/delaccount', { method: 'POST', body: JSON.stringify({ name: a.name }) })
+                .then(function (r) {
+                  if (r && r.ok) {
+                    if (SEL === a.name) { SEL = null; }
+                    renderAccountsView(); loadAccounts();
+                  } else alert((r && r.msg) || '删除失败');
+                });
             });
         };
         acts.appendChild(btn); acts.appendChild(be); acts.appendChild(bd);
@@ -4689,7 +4751,7 @@
     if (UPD.hasUpdate && UPD.latest) {
       // 「已经到手的最高版本」：正常运行就是当前版本；装完还没重启时，
       // 磁盘上那份（applied）比正在跑的新，得拿它当基准，否则会出现
-      // 「新版 1.5.18 的文件已就位」旁边又写「网盘上有更新的 1.5.18」。
+      // 「新版 1.5.18 的文件已就位」旁边又写「清单源上有更新的 1.5.18」。
       var base = (UPD.applied && UPD.cur && verCmp(UPD.applied, UPD.cur) > 0)
         ? UPD.applied : UPD.cur;
       if (base && verCmp(UPD.latest, base) <= 0) {
@@ -4853,7 +4915,8 @@
   var UPD_CONFIRM_TIMER = null;
   function updInstall() {
     if (!UPD.hasUpdate || UPD.installing) return;
-    // 不用原生 confirm()：双屏/窗口失焦时弹窗可能落在看不见的屏，甚至让进程直接退出。
+    // 不用原生 confirm()：那是原生层模态框，双屏/失焦时可能弹到另一块屏或
+    // 被主窗口挡住（看着像卡死），且弹着时阻塞整页脚本。
     // 改成页面内二次点击：第一次点变成确认态，6 秒内再点一次才真正开始。
     if (!UPD.confirmPending) {
       UPD.confirmPending = true;
